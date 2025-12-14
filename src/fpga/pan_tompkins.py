@@ -46,6 +46,12 @@ def pan_tompkins_ref(ecg, fs=Fs, bandpass_taps=coefs, mwi_ms=150):
 
 if __name__ == "__main__":
     # Synthetic ECG-like test (1 Hz heartbeat + harmonics + noise)
+    str = "-144 -207 -321 -488 -679 -840 -898 -778 -427  172  985 1926 2872 3683 4231 4424 4231 3683 2872 1926  985  172 -427 -778 -898 -840 -679 -488 -321 -207 -144"
+    result = ""
+    for i in str.split():
+        result = result + f"16'sd{int(i)}, "
+    print(result)
+
     duration_s = 10
     t = np.arange(0, duration_s, 1.0 / Fs)
     ecg = 0.9 * np.sin(2 * np.pi * 1.0 * t) \

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.signal import firwin
+from matplotlib import pyplot
 
 # Sampling frequency
 Fs = 250.0

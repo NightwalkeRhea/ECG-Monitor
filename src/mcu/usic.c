@@ -7,6 +7,7 @@
 // USIC0_CH0_BASE = 0x48000000UL -> check mcu_definition.h for the register mapping. 
 #define CH0_KSCFG          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x0C)) // Kernel State Configuration
 #define CH0_CCR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x40)) // Channel Control Register
+#define CH0_CCFG           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x04))
 #define CH0_FDR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x10)) // Fractional Divider Register
 #define CH0_BRG            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x14)) // Baud Rate Generator
 #define CH0_SCTR           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x34)) // Shift Control Register
@@ -17,6 +18,13 @@
 #define CH0_RBUF           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x54)) // Receive Buffer Register
 #define CH0_DX0CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x1C)) // Input Control Register 0 (SDA/RXD)
 #define CH0_DX1CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x20)) // Input Control Register 1 (SCL/TXD)
+
+#define CCFG_SSC (1U<<0)
+#define CCFG_ASC (1U<<1)
+#define CCFG_IIC (1U<<2)
+#define CCFG_RB  (1U<<6)
+#define CCFG_TB  (1U<<7)
+
 
 // --- USIC0 Channel 1 Register Pointers (SPI) ---
 // USIC0_CH1_BASE = 0x48000200UL
@@ -35,12 +43,12 @@
 #define CH1_DX2CR          (*(volatile uint32_t*)(USIC0_CH1_BASE + 0x24)) // Input Control Register 2 (CS/SELIN)
 
 // IIC TDF (Transfer Data Format) Codes (Bits [10:8] when writing to TBUF) [14-121]
-#define TDF_START_WRITE        (0x04U) // 100b: Send START + Slave Address + Write Bit
-#define TDF_REPEATED_START_READ (0x05U) // 101b: Send Repeated START + Slave Address + Read Bit
-#define TDF_DATA               (0x00U) // 000b: Send Data Byte (ACK requested from slave)
-#define TDF_DATA_NO_ACK        (0x01U) // 001b: Send Data Byte, request NACK from slave
-#define TDF_STOP               (0x02U) // 010b: Send STOP Condition (used only after data read)
-#define TDF_NACK_STOP          (0x06U) // 110b: Send NACK + STOP Condition (used after final byte read)
+#define TDF_MASTER_TX          (0x0U) // 000b: Send data byte (master transmit)
+#define TDF_MASTER_RX_ACK      (0x2U) // 010b: Receive byte and send ACK
+#define TDF_MASTER_RX_NACK     (0x3U) // 011b: Receive Byte and send NACK
+#define TDF_MASTER_START       (0x4U) // 100b: Send START and address in TBUF[7:0]
+#define TDF_MASTER_RESTART     (0x5U) // 101b: Send repeated START and address in TBUF[7:0]
+#define TDF_MASTER_STOP        (0x6U) // 110b: Send STOP Condition
 
 // PSR Flag Masks
 #define PSR_TBIF_MASK          (1U << 13) // Transmit Buffer Indication Flag
@@ -97,23 +105,36 @@ void USIC_Clock_Enable(void) {
 void USIC_I2C_Init(void) {
     // 1. Disable Channel and Clear Flags
     CH0_KSCFG &= ~(1U << 0);          // Disable Channel (MODEN=0) [14-165]
+    CH0_CCR = 0x0U;         // CCR.MODE = 0000b
     CH0_PSCR = 0xFFFFFFFFU;           // Clear all status flags [14-170]
+    // we make sure when configuring the input stages, the channel is not in IIC mode
 
-    // 2. Configure Pins (P0.15 = SCL, P0.14 = SDA)
-    // We target Alternate Function Open-Drain Output (e.g., ALT7: 11111b) 
-    #define ALT_OPEN_DRAIN (0x1FU)
+    // 2. Configure Pins (P0.15 = SDA, P0.14 = SCL)
+    // We target Alternate Function Open-Drain Output (e.g., ALT7: 11111b)
+    // Looking at the user manual, P0.14 -> USIC0_CH0. DOUT0 is ALT6, USIC0_CH0. SCLKOUT is ALT7.
+    // P0.15 -> USIC0_CH0. DOUT0 is ALT6, USIC0_CH1. MCLKOUT is ALT7 
+    #define ALT7_OPEN_DRAIN (0x1FU) 
+    #define ALT6_OPEN_DRAIN (0x1EU)
     P0_IOCR12 &= ~((0x1FUL << 27) | (0x1FUL << 19)); // Clear bits for P0.15/P0.14
-    P0_IOCR12 |= (ALT_OPEN_DRAIN << 27); // P0.15 (SCL)
-    P0_IOCR12 |= (ALT_OPEN_DRAIN << 19); // P0.14 (SDA)
+    P0_IOCR12 |= (ALT6_OPEN_DRAIN << 27) | (ALT7_OPEN_DRAIN << 19); // set SDA + SCL
+    // Input Stage Configuration (IIC mode uses DX0 for SDA, DX1 for SCL)
+    // Select the pin inputs. 
+    // Note: IIC automatically links output DOUT0 to the input DX0 line internally for sensing [14-109].
+    CH0_DX0CR = 1U; // DX0B Input: SDA input  -> P0.15 
+    CH0_DX1CR = 0U; // DX1A Input: SCL input  -> P0.14  
+
+    // Configuring protocol framing, 8bit data transfer and MSB first
+    CH0_SCTR = (7U << 8) | (1U << 7); // SCTR.WLE=7, SDIR=1  [14-182]
 
     // 3. Protocol Setup (IIC Mode 4H)
     CH0_CCR = (0x4U << 0); // Set Mode to IIC (0100b) [14-159]
 
     // 4. Baud Rate Configuration (Targeting 100 kHz I2C Standard Mode)
-    // PERIPHERAL_CLK_FREQ = 64 MHz. Target TQ frequency (fPCTQ) must be 10 * fIIC = 1 MHz.
+    // PERIPHERAL_CLK_FREQ = 64 MHz. Target TQ frequency (fPCTQ) must be 10 * fIIC = 1 MHz.  
+    // (STIM=0): PDIV=4, DCTQ=9 (10 TQ)
     // Baud Rate Formula (simplified for non-fractional divider): fPCTQ = fPERIPH / (PDIV + 1)
     // PDIV = (64 MHz / 1 MHz) - 1 = 63.
-    CH0_FDR = (0x1U << 14) | (0x3FFU << 0); // FDR.DM=1 (Divider Mode), Bypass fractional step [14-177]
+    CH0_FDR = (0x1U << 14) | (0x3FFU << 0); // select the clock source: FDR.DM=1 (Divider Mode), Bypass fractional step [14-177]
     CH0_BRG = (63U << 0); // BRG.PDIV = 63. fPCTQ = 64M / 64 = 1 MHz. [14-178]
     
     // 5. IIC Protocol Control
@@ -121,15 +142,6 @@ void USIC_I2C_Init(void) {
     // HDEL = 3 (Hardware Delay for SDA Hold Time ~300ns) [14-131, 14-118]
     CH0_PCR = (0U << 17) | // PCR.STIM = 0 (100 kBaud Standard Mode)
               (3U << 26); // PCR.HDEL = 3 (Adjust delay for hold time)
-
-    // 6. Data Framing: 8-bit Data Transfer, MSB first
-    CH0_SCTR = (7U << 8) | (1U << 7); // SCTR.WLE=7 (8 data bits), SDIR=1 (MSB first) [14-182]
-
-    // 7. Input Stage Configuration (IIC mode uses DX0 for SDA, DX1 for SCL)
-    // Select the pin inputs. P0.14 is DX0A/DX1A. [14-227]
-    // Note: IIC automatically links output DOUT0 to the input DX0 line internally for sensing [14-109].
-    CH0_DX0CR = (0U << 0) | (0U << 4) | (0U << 8); // DX0 Input: Selection 0 (P0.14) [14-227]
-    CH0_DX1CR = (0U << 0) | (0U << 4) | (0U << 8); // DX1 Input: Selection 0 (P0.14) [14-227]
     
     // 8. Enable Channel
     CH0_KSCFG |= (1U << 0); // MODEN=1 [14-165]
@@ -144,13 +156,28 @@ void USIC_I2C_StartWrite(uint8_t slave_addr, uint8_t reg_addr) {
     // Explanation: Prepares the USIC TBUF to send the I2C START condition, 
     // the target slave address (left-shifted, with R/W bit low), and the 
     // internal register pointer address byte (reg_addr).
-    
-    // 1. Write the pointer address (0x00 or 0x01) with TDF START_WRITE code.
+    uint8_t addr_w = (uint8_t)((slave_addr << 1) | 0U);
+    // 1. Start + address for writing.
     // The IIC PPP extracts the slave address from the TBUF location write. [14-121]
-    CH0_TBUF = (reg_addr) | (TDF_START_WRITE << 8) | ((uint32_t)slave_addr << 17);
+    CH0_TBUF = ((uint32_t)TDF_MASTER_START << 8) | addr_w; 
+    USIC_WaitForFlag_CH0(PSR_TBIF_MASK);
+    USIC_ClearFlag_CH0(PSR_TBIF_MASK);
+    // Send pointer/register address byte
+    CH0_TBUF = ((uint32_t)TDF_MASTER_TX << 8) | reg_addr;
+    USIC_WaitForFlag_CH0(PSR_TBIF_MASK);
+    USIC_ClearFlag_CH0(PSR_TBIF_MASK);
+}
 
-    // 2. Wait for Transmit Buffer Indication Flag (TBIF) to confirm the transaction started.
-    USIC_WaitForFlag_CH0(PSR_TBIF_MASK); 
+/**
+ * @brief Sends the repeated START condition
+ * @param slave_addr 7-bit I2C address of the target device 
+ */
+void USIC_I2C_RepeatedStartRead(uint8_t slave_addr)
+{
+    uint8_t addr_r = (uint8_t)((slave_addr << 1) | 1U);
+
+    CH0_TBUF = ((uint32_t)TDF_MASTER_RESTART << 8) | addr_r;
+    USIC_WaitForFlag_CH0(PSR_TBIF_MASK);
     USIC_ClearFlag_CH0(PSR_TBIF_MASK);
 }
 
@@ -163,22 +190,13 @@ void USIC_I2C_SendByte(uint8_t data, uint8_t stop_condition) {
     // Explanation: Sends a single data byte (e.g., config MSB or LSB). 
     // If stop_condition is true, the transaction is terminated with TDF_NACK_STOP code.
     
-    uint32_t tdf_code = TDF_DATA;
-    if (stop_condition) {
-        // Use NACK_STOP for writing data [14-123]
-        tdf_code = TDF_NACK_STOP;
-    }
-
-    // 1. Write data byte + TDF code to TBUF.
-    CH0_TBUF = data | (tdf_code << 8);
-
-    // 2. Wait for TBIF (transfer buffer empty)
-    USIC_WaitForFlag_CH0(PSR_TBIF_MASK); 
+    CH0_TBUF = ((uint32_t)TDF_MASTER_TX << 8) | data;
+    USIC_WaitForFlag_CH0(PSR_TBIF_MASK);
     USIC_ClearFlag_CH0(PSR_TBIF_MASK);
 
-    // 3. If STOP was requested, wait for PCR flag (Stop Condition Received) [14-132]
     if (stop_condition) {
-        USIC_WaitForFlag_CH0(PSR_PCR_MASK); 
+        CH0_TBUF = ((uint32_t)TDF_MASTER_STOP << 8);
+        USIC_WaitForFlag_CH0(PSR_PCR_MASK);   // Stop detected flag
         USIC_ClearFlag_CH0(PSR_PCR_MASK);
     }
 }
@@ -194,33 +212,27 @@ uint8_t USIC_I2C_ReadByte(uint8_t ack_condition, uint8_t stop_condition) {
     // It triggers the next byte read and controls the ACK/NACK/STOP handshake.
 
     // 1. Send dummy word to trigger the read operation and set the ACK/NACK condition.
-    uint32_t tdf_code;
-    if (ack_condition) {
-        // TDF_DATA (000b) is used to request an ACK from the master after the byte read.
-        tdf_code = TDF_DATA; 
-    } else {
-        // TDF_NACK_STOP (110b) is used to send NACK + STOP [14-123]
-        tdf_code = TDF_NACK_STOP; 
-    }
+    uint32_t tdf = ack_condition ? TDF_MASTER_RX_ACK : TDF_MASTER_RX_NACK;
+    // 010b (ACK) for intermediate bytes and 011b (NACK) for the last byte, then STOP.
     
-    // 2. Write dummy data (0x00) with TDF code.
-    CH0_TBUF = (0x00U) | (tdf_code << 8); 
+    // Trigger receive (TBUF[7:0] ignored for RX formats)
+    CH0_TBUF = ((uint32_t)tdf << 8);
 
-    // 3. Wait for Receive Indication Flag (RIF) or Alternative RIF (AIF)
-    // AIF (bit 15) usually indicates the first byte read after address [14-132]
-    // RIF (bit 14) indicates subsequent bytes received [14-132]
-    USIC_WaitForFlag_CH0(PSR_RIF_MASK | PSR_AIF_MASK); 
-    USIC_ClearFlag_CH0(PSR_RIF_MASK | PSR_AIF_MASK);
-    
-    // 4. Read the received data byte (bits 7:0 of RBUF)
-    uint8_t received_data = (uint8_t)CH0_RBUF;
+    // Wait until data arrives: first byte may set AIF, later set RIF (either is fine)
+    while (((CH0_PSR & PSR_AIF_MASK) == 0U) && ((CH0_PSR & PSR_RIF_MASK) == 0U)) { }
 
-    // 5. If STOP was requested, wait for PCR flag (Stop Condition Received)
+    // Clear whichever flag(s) fired
+    if (CH0_PSR & PSR_AIF_MASK) USIC_ClearFlag_CH0(PSR_AIF_MASK);
+    if (CH0_PSR & PSR_RIF_MASK) USIC_ClearFlag_CH0(PSR_RIF_MASK);
+    uint8_t data = (uint8_t)CH0_RBUF;
+
     if (stop_condition) {
-        USIC_WaitForFlag_CH0(PSR_PCR_MASK); 
+        // STOP must be a separate TDF after the last receive
+        CH0_TBUF = ((uint32_t)TDF_MASTER_STOP << 8);
+        USIC_WaitForFlag_CH0(PSR_PCR_MASK);
         USIC_ClearFlag_CH0(PSR_PCR_MASK);
     }
-    return received_data;
+    return data;
 }
 
 // -----------------------------------------------------------------------------

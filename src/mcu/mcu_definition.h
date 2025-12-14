@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+// This header file will serve as a Centralized header for all peripheral base addresses and fundamental constants.
 
 // -----------------------------------------------------------------------------
 // MCU CORE AND SYSTEM DEFINITIONS (XMC1100)
@@ -28,8 +29,8 @@
 // -----------------------------------------------------------------------------
 
 // SCU Register for Peripheral Clock Gating
-#define SCU_CGATCLR0           (*(volatile uint32_t*)(SCU_BASE + 0x0C))
-
+#define SCU_CGATCLR0           (*(volatile uint32_t*)(SCU_BASE + 0x10UL))
+#define SCU_CGATSET0           (*(volatile uint32_t*)(SCU_BASE + 0x0CUL))
 // GPIO Control Registers
 #define P0_IOCR0               (*(volatile uint32_t*)(PORT0_BASE + 0x10UL)) // P0.0 to P0.3 
 #define P0_IOCR8               (*(volatile uint32_t*)(PORT0_BASE + 0x18UL)) // P0.8 to P0.11

@@ -3,7 +3,7 @@
 #include "clock_systick.h"
 
 // Note: Ensure USIC0 clock is enabled in a system initialization function 
-// before calling USIC/comm_api functions from the ISR. 
+// before calling USIC/common.c functions from the ISR. 
 // TODO: How?
 
 void SysTick_Init(void) {

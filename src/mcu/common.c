@@ -39,37 +39,38 @@ void System_Init(void) {
     USIC_I2C_SendByte(config_lsb, 1); // True sends STOP condition
 }
 
-int16_t ADC_Read_Sample(void) {
-    // 1. Trigger Single-Shot Conversion (write '1' to OS bit)
-    // This is typically done by re-writing the config register with OS=1, which
-    // is simplified by the fact that the ADS1115 returns to power-down state (OS=0) 
-    // Sequence: START, Slave+W, Pointer(0x01), MSB(OS=1), LSB, STOP
-    uint16_t config_word_start = ADS1115_CONFIG_WORD | (1U << 15); 
+int16_t ADC_Read_Sample(void)
+{
+    // 1) Trigger single-shot by writing config with OS=1 (bit 15)
+    uint16_t config_word_start = (uint16_t)(ADS1115_CONFIG_WORD | (1U << 15));
+
     USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
-    USIC_I2C_SendByte((config_word_start >> 8), 0);
-    USIC_I2C_SendByte((config_word_start & 0xFFU), 1);
-
-    // 2. Wait for Conversion Ready (or implement alert pin polling)
-    // For simplicity, a brief delay can be used, but polling the ALERT/RDY pin (if wired) or 
-    // the OS bit is safer. Assume polling OS bit (register read) or short delay here.
-    //... wait delay or poll conversion status... 
-
-    // 3. Read Conversion Register (0x00)
-    // Sequence: START, Slave+W, Pointer(0x00), Repeated START, Slave+R, Read MSB(ACK), Read LSB(NACK), STOP
-    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG); 
+    USIC_I2C_SendByte((uint8_t)(config_word_start >> 8), 0);
+    USIC_I2C_SendByte((uint8_t)(config_word_start & 0xFFU), 1); // STOP
     
-    uint8_t msb = USIC_I2C_ReadByte(1, 0); // Read MSB, send ACK (more data coming)
-    uint8_t lsb = USIC_I2C_ReadByte(0, 1); // Read LSB, send NACK (stop transfer)
-    
-    int16_t raw_value = (int16_t)((msb << 8) | lsb);
+    // 2) Wait conversion time (simple version).
+    // If DR=128 SPS, conversion ~7.8ms. If DR=250 SPS, ~4ms, etc.
+    // Replace this with proper OS-bit polling later.
+    for (volatile uint32_t i = 0; i < 50000; i++) { __asm__("nop"); }
 
-    // 4. Zero-Centering (Remove DC Offset)
-    // The AD8232 outputs a signal centered at ~1.5V (half of 3.3V supply).
-    // PGA +/- 4.096V has 1 LSB = 4.096V / 32768 = 0.125 mV/step.
-    // The digital equivalent of the 1.5V offset must be subtracted.
-    // Digital_Offset = 1.5V / 0.125mV = 12000 (Example value)
-    #define DIGITAL_DC_OFFSET (12000) 
-    return raw_value - DIGITAL_DC_OFFSET;
+    // 3) Set pointer to conversion register (0x00)
+    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG);
+
+    // 4) Repeated START + Read two bytes
+    USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
+
+    uint8_t msb = USIC_I2C_ReadByte(1, 0); // ACK (more bytes coming)
+    uint8_t lsb = USIC_I2C_ReadByte(0, 1); // NACK (last byte) + STOP
+
+    int16_t raw = (int16_t)((uint16_t)((uint16_t)msb << 8) | (uint16_t)lsb);
+
+    // 5) Optional: DC offset removal (make it a tunable constant!)
+    // Better approach: estimate baseline digitally (moving average) instead of hardcoding.
+    #ifndef DIGITAL_DC_OFFSET
+    #define DIGITAL_DC_OFFSET (0)
+    #endif
+
+    return (int16_t)(raw - (int16_t)DIGITAL_DC_OFFSET);
 }
 
 void FPGA_Send_Data(int16_t zero_centered_sample) {
