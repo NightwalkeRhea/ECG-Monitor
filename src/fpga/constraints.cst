@@ -1,0 +1,29 @@
+// ecg_system.cst
+// Constraints file for Tang Nano 9K (GW1NR-9) using user I/O pads
+
+// Define Voltage Standard (3.3V LVCMOS is standard for interfacing external chips)
+// All pads must reference this standard for correct pin configuration.
+
+// 1. System Clock
+IO_LOC "CLK_27MHZ" PIN35;
+IO_PORT "CLK_27MHZ" IO_TYPE=LVCMOS33;
+CREATE_CLOCK -name {clk_27mhz_inst} -period 37.037 [get_ports {CLK_27MHZ}];
+// 2. MCU SPI Interface (Slave)
+IO_LOC "SPI_SCLK_IN" IOL10A;
+IO_PORT "SPI_SCLK_IN" IO_TYPE=LVCMOS33;
+IO_LOC "SPI_MOSI_IN" IOL9B;
+IO_PORT "SPI_MOSI_IN" IO_TYPE=LVCMOS33;
+IO_LOC "SPI_CS_N_IN" IOL8B;
+IO_PORT "SPI_CS_N_IN" IO_TYPE=LVCMOS33;
+// 3. W25Q64 Flash Interface (Master)
+IO_LOC "FLASH_SCLK_OUT" IOL7B;
+IO_PORT "FLASH_SCLK_OUT" IO_TYPE=LVCMOS33;
+IO_LOC "FLASH_MOSI_OUT" IOL6B;
+IO_PORT "FLASH_MOSI_OUT" IO_TYPE=LVCMOS33;
+IO_LOC "FLASH_MISO_IN" IOL5B;
+IO_PORT "FLASH_MISO_IN" IO_TYPE=LVCMOS33;
+IO_LOC "FLASH_CS_N_OUT" IOL4B;
+IO_PORT "FLASH_CS_N_OUT" IO_TYPE=LVCMOS33;
+// 4. Actuator Output (Alarm Signal)
+IO_LOC "ALARM_OUT" IOL16B;
+IO_PORT "ALARM_OUT" IO_TYPE=LVCMOS33;

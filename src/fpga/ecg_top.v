@@ -1,105 +1,179 @@
 // ecg_top.v
-// Top module instantiating all components.
+// Top module integrating CDC-safe SPI RX, DSP pipeline, Actuation, and Flash Logger.
 
 module ecg_top (
-    // External Interfaces
-    input  wire         clk_27mhz,       // Onboard 27 MHz oscillator
-    input  wire         rst_n,           // Active low reset (e.g., from MCU/JTAG programmer)
+    // System Interfaces (Mapped via.cst file)
+    input  wire CLK_27MHZ,        // Pin PIN35 (27 MHz Oscillator)
+    input  wire RST_N,            // Active low reset 
 
     // Interface to XMC1100 (SPI Slave)
-    input  wire         spi_sclk_in,     // XMC SCLK (Input)
-    input  wire         spi_cs_n_in,     // XMC CS (Input)
-    input  wire         spi_mosi_in,     // XMC MOSI (Input)
+    input  wire SPI_SCLK_IN,      // Pin IOL10A
+    input  wire SPI_CS_N_IN,      // Pin IOL8B
+    input  wire SPI_MOSI_IN,      // Pin IOL9B
 
-    // Interface to Passive Buzzer/LED via MCU GPIO (Actuation Output)
-    output wire         alarm_signal_out,// Connects to dedicated MCU input pin
+    // Interface to Passive Buzzer/LED via dedicated MCU input pin
+    output reg ALARM_OUT,        // Pin IOL16B (Alarm Output to XMC GPIO)
 
     // Interface to W25Q64 External Flash (SPI Master)
-    output wire         flash_sclk_out,
-    output wire         flash_cs_n_out,
-    output wire         flash_mosi_out,
-    input  wire         flash_miso_in
+    output wire FLASH_SCLK_OUT,   // Pin IOL7B
+    output wire FLASH_CS_N_OUT,   // Pin IOL4B
+    output wire FLASH_MOSI_OUT,   // Pin IOL6B
+    input  wire FLASH_MISO_IN     // Pin IOL5B
 );
 
     // --- Internal Signals ---
     
-    // 1. DSP Data Path Signals
-    wire [15:0] ecg_data_in_q1_15;
-    wire        ecg_data_valid;
+    // 1. Data Path Signals (Driven by spi_slave_rx)
+    wire signed [15:0] ecg_raw_sample_in; 
+    wire               sample_valid_pulse;
 
-    wire [15:0] filtered_data_q1_15;
-    wire        qrs_detected;
-    wire [7:0]  current_bpm;             // BPM output (8-bit sufficient for 0-255 BPM)
+    // 2. DSP Pipeline Outputs (Driven by dsp_pipeline_qrs)
+    wire signed [15:0] filtered_data_out;
+    wire               qrs_detected;
+    wire [7:0]         current_bpm;       
+    wire               log_trigger;       
+    wire [15:0]        log_word;          // 16-bit word to push to buffer
+    wire               log_word_valid;    // Valid pulse for log_word
 
-    // 2. Logging and Actuation Signals
-    wire        log_trigger;             // DSP wants to save a block of data
-    wire [23:0] log_data_block;          // Block of data/status to save
+    // 3. Flash Logger Control Signals
+    wire [7:0]  buf_dout;          // Data byte out from Page Buffer
+    wire [7:0]  buf_addr;          // Address requested by Logger
+    wire        buf_full;          // Page buffer status (Ready to write to Flash)
+    wire        logger_busy;       // Logger status (WREN/Program In Progress)
 
-    // 3. Clock Generation
-    // Clock divider for core DSP logic (optional, keep at 27MHz for max throughput)
-    // Placeholder for slower Flash control clock if needed, but 27MHz is fine.
-    // We assume clk_core = clk_27mhz for DSP.
-    wire clk_core = clk_27mhz;
-
-
-    // --- I. SPI Slave: Receive Data from MCU ---
+    // Core Clock Definition
+    wire clk_core = CLK_27MHZ;
+    
+    // --- 1. SPI Slave: Receive Data from MCU (CDC-Safe) ---
+    // Instantiates the robust module provided previously.
     spi_slave_rx spi_rx_inst (
-       .clk_system     (clk_core),
-       .rst_n          (rst_n),
-       .spi_sclk       (spi_sclk_in),
-       .spi_cs_n       (spi_cs_n_in),
-       .spi_mosi       (spi_mosi_in),
-       .ecg_data_out   (ecg_data_in_q1_15),
-       .data_valid     (ecg_data_valid)
+   .clk_system     (clk_core),
+   .rst_n          (RST_N),
+   .spi_sclk       (SPI_SCLK_IN),
+   .spi_cs_n       (SPI_CS_N_IN),
+   .spi_mosi       (SPI_MOSI_IN),
+   .ecg_data_out   (ecg_raw_sample_in),
+   .data_valid     (sample_valid_pulse)
     );
 
 
-    // --- II. DSP Pipeline and QRS Detection (Fixed-Point Logic) ---
-    // This is the largest and most complex section, implemented as a black box here.
-    /* synthesis black_box */
-    dsp_pipeline_qrs dsp_inst (
-       .clk_core           (clk_core),
-       .rst_n              (rst_n),
-       .raw_ecg_in         (ecg_data_in_q1_15),
-       .valid_in           (ecg_data_valid),
-       .filtered_out       (filtered_data_q1_15),
-       .qrs_detected_out   (qrs_detected),
-       .current_bpm_out    (current_bpm),
-       .log_data_out       (log_data_block), // Example: pack BPM + last filtered value
-       .log_trigger_out    (log_trigger)     // Trigger to initiate flash write
+    // --- 2. DSP Pipeline (Uses your FIR, generates logging data) ---
+    // This is the core logic that computes QRS and BPM.
+    dsp_pipeline_qrs dsp_pipeline_inst (
+   .clk_core         (clk_core),
+   .rst_n            (RST_N),
+   .raw_in           (ecg_raw_sample_in),
+   .valid_in         (sample_valid_pulse),
+   .filtered_out     (filtered_data_out), // Output for potential DAC/Debug use
+   .qrs_detected_out (qrs_detected),
+   .current_bpm_out  (current_bpm),
+   .log_trigger_out  (log_trigger),       // Generic trigger (e.g., QRS event or timer)
+   .log_word_out     (log_word),          // Data word chosen for logging (e.g., filtered sample)
+   .log_word_valid   (log_word_valid)     // Pulse when log_word is ready
     );
 
 
-    // --- III. Actuator Logic ---
-    // Simple logic: Trigger alarm if BPM is outside the acceptable range (e.g., 50-100 BPM)
-    // The Actuator module simplifies triggering the pin based on DSP output.
-    qrs_actuator actuator_inst (
-       .clk_core           (clk_core),
-       .rst_n              (rst_n),
-       .current_bpm        (current_bpm),
-       .alarm_out          (alarm_signal_out)
+    // --- 3. Actuator Logic (BPM Threshold Check) ---
+    // Reads results from the DSP pipeline and sets the ALARM_OUT pin.
+    
+    localparam BPM_LOW_THRESHOLD  = 8'd50;
+    localparam BPM_HIGH_THRESHOLD = 8'd100;
+
+    always @(posedge clk_core or negedge RST_N) begin
+        if (!RST_N) begin
+            ALARM_OUT <= 1'b0;
+        end else begin
+            if ((current_bpm > BPM_HIGH_THRESHOLD) || (current_bpm < BPM_LOW_THRESHOLD)) begin
+                ALARM_OUT <= 1'b1; 
+            end else begin
+                ALARM_OUT <= 1'b0;
+            end
+        end
+    end
+
+    // --- 4. Log Buffering: Page Buffer Integration ---
+    // Acts as the FIFO/buffer holding 128 samples until the full page is ready.
+    page_buffer_256B buffer_inst (
+       .clk         (clk_core),
+       .reset_n     (RST_N),
+       .push_word   (log_word_valid),      // Push data only when DSP says it's ready
+       .word_in     (log_word),
+       .buf_dout    (buf_dout),
+       .buf_addr    (buf_addr),
+       .buf_full    (buf_full),            // Output status: Page is ready
+       .logger_busy (logger_busy)          // Input status: Is the logger currently writing?
     );
 
-
-    // --- IV. SPI Master: Control W25Q64 Flash ---
-    // This module handles the slow, complex Flash command sequences (Write Enable, Page Program)
-    /* synthesis black_box */
-    w25q64_spi_master flash_master_inst (
-       .clk_core           (clk_core),
-       .rst_n              (rst_n),
-       .start_write_i      (log_trigger), 
-       .address_in         (24'h000000), // Placeholder: address management needed in actuator
-       .byte_data_in       (log_data_block[7:0]), // Placeholder: data stream control needed
-       .new_byte_valid     (log_trigger),
-       .spi_sclk_out       (flash_sclk_out),
-       .spi_mosi_out       (flash_mosi_out),
-       .spi_cs_n_out       (flash_cs_n_out),
-       .spi_miso_in        (flash_miso_in),
-       .busy_flag_out      () // Status flags ignored at top level
+    // --- 5. Flash Logger: SPI Master Integration ---
+    // Instantiates your actual low-level flash controller module.
+    // Assuming w25q64_page_logger generates SCLK/MOSI/CS and requires buf_full to start.
+    w25q64_page_logger #(
+        // Add necessary parameters (e.g., CLK_DIV, START_ADDR) here
+    ) flash_log_inst (
+       .clk       (clk_core),
+       .reset_n   (RST_N),
+       .buf_dout  (buf_dout),           // Data source (from page buffer)
+       .buf_addr  (buf_addr),           // Address request (back to page buffer)
+       .buf_full  (buf_full),           // Start condition
+       .buf_flush (log_trigger),        // You may use log_trigger to flush the buffer early if needed
+        // Physical SPI Pins
+       .spi_sck   (FLASH_SCLK_OUT),
+       .spi_mosi  (FLASH_MOSI_OUT),
+       .spi_miso  (FLASH_MISO_IN),
+       .spi_csn   (FLASH_CS_N_OUT),
+       .busy      (logger_busy)
     );
 
 endmodule
 
 
+// =================================================================
+// DSP Pipeline and Logger Skeletons (To be replaced by your files)
+// =================================================================
 
+// Skeleton for dsp_pipeline_qrs.v (Maintained for single-driver compliance)
+module dsp_pipeline_qrs (
+    input wire clk_core,
+    input wire rst_n,
+    input wire signed [15:0] raw_in,
+    input wire valid_in,
+    output wire signed [15:0] filtered_out,
+    output wire qrs_detected_out,
+    output wire [7:0] current_bpm_out,
+    output wire log_trigger_out,
+    output wire [15:0] log_word_out,
+    output wire log_word_valid
+);
+    // Dummy outputs (Must be replaced by actual signal processing logic)
+    // Placeholder logic for debug: log every sample.
+    assign filtered_out = raw_in;
+    assign qrs_detected_out = 1'b0;
+    assign current_bpm_out = 8'd75;
+    assign log_trigger_out = 1'b0; // This signal would trigger logging on event
+    
+    // Log word is the raw input, valid when the sample arrives
+    assign log_word_out = raw_in;
+    assign log_word_valid = valid_in;
+endmodule
 
+// Skeleton for w25q64_page_logger.v (Your SPI Master Flash Controller)
+module w25q64_page_logger (
+    input wire clk,
+    input wire reset_n,
+    input wire [7:0] buf_dout,
+    output wire [7:0] buf_addr,
+    input wire buf_full,
+    input wire buf_flush,
+    output wire spi_sck,
+    output wire spi_mosi,
+    input wire spi_miso,
+    output wire spi_csn,
+    output wire busy
+);
+    // Placeholder outputs (Replace with state machine logic for WREN, PROGRAM, etc.)
+    assign buf_addr = 8'd0;
+    assign spi_sck = clk;
+    assign spi_mosi = 1'b0;
+    assign spi_csn = 1'b1;
+    assign busy = 1'b0;
+endmodule

@@ -47,7 +47,7 @@ int16_t ADC_Read_Sample(void)
     USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
     USIC_I2C_SendByte((uint8_t)(config_word_start >> 8), 0);
     USIC_I2C_SendByte((uint8_t)(config_word_start & 0xFFU), 1); // STOP
-    
+
     // 2) Wait conversion time (simple version).
     // If DR=128 SPS, conversion ~7.8ms. If DR=250 SPS, ~4ms, etc.
     // Replace this with proper OS-bit polling later.
@@ -101,4 +101,36 @@ void PC_Transmit_Filtered_Data(int16_t filtered_data, uint16_t bpm) {
     // 3. Switch Channel back to I2C (IIC) Mode
     // This is vital to ensure the next 250 Hz SysTick ISR finds the channel ready for the ADC read.
     USIC_SetMode_I2C_CH0(); 
+}
+
+// Call this from your main loop when g_sample_tick == 1
+// (clear g_sample_tick after calling)
+int16_t Sampling_Task(void)
+{
+    static uint8_t phase = 0;  // 0=trigger, 1=read
+    int16_t sample = 0;
+
+    if (phase == 0) {
+        // Trigger conversion only (no waiting)
+        uint16_t cfg = (uint16_t)(ADS1115_CONFIG_WORD | (1U << 15));
+
+        USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
+        USIC_I2C_SendByte((uint8_t)(cfg >> 8), 0);
+        USIC_I2C_SendByte((uint8_t)(cfg & 0xFFU), 1); // STOP
+
+        phase = 1;
+        return 0; // no new sample yet
+    } else {
+        // Read conversion result
+        USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG);
+        USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
+
+        uint8_t msb = USIC_I2C_ReadByte(1, 0);
+        uint8_t lsb = USIC_I2C_ReadByte(0, 1); // NACK + STOP
+
+        sample = (int16_t)(((uint16_t)msb << 8) | (uint16_t)lsb);
+
+        phase = 0;
+        return sample;
+    }
 }
