@@ -1,64 +1,76 @@
 `timescale 1ns/1ns
-// this module assumes 16-bit signed samples, 16-bit signed Q1.15 coefficients,
-// and produces a widened accumulator that is scaled back to Q1.15 with a right shift of 15.
+// Sequential sample-gated FIR filter for ECG processing.
+// A new sample is accepted only when the MAC engine is idle.
 
 module fir_filter #(
     parameter integer N_TAPS      = 31,
-    parameter integer DATA_W      = 16,  // signed input width
-    parameter integer COEFF_W     = 16,  // signed Q1.15 coeffs
-    parameter integer ACC_GUARD   = 6,   // ceil(log2(31)) = 5, add 1 for headroom
-    //  Q1.15 tap values from fir_coef.py
+    parameter integer DATA_W      = 16,
+    parameter integer COEFF_W     = 16,
+    parameter integer ACC_GUARD   = 6,
     parameter signed [COEFF_W-1:0] COEFFS [0:N_TAPS-1] = '{
-        16'sd-144, 16'sd-207, 16'sd-321, 16'sd-488, 16'sd-679, 16'sd-840, 16'sd-898, 16'sd-778, 16'sd-427,
+        -16'sd144, -16'sd207, -16'sd321, -16'sd488, -16'sd679, -16'sd840, -16'sd898, -16'sd778, -16'sd427,
         16'sd172, 16'sd985, 16'sd1926, 16'sd2872, 16'sd3683, 16'sd4231, 16'sd4424, 16'sd4231, 16'sd3683,
-        16'sd2872, 16'sd1926, 16'sd985, 16'sd172, 16'sd-427, 16'sd-778, 16'sd-898, 16'sd-840, 16'sd-679,
-        16'sd-488, 16'sd-321, 16'sd-207, 16'sd-144
-    }                
+        16'sd2872, 16'sd1926, 16'sd985, 16'sd172, -16'sd427, -16'sd778, -16'sd898, -16'sd840, -16'sd679,
+        -16'sd488, -16'sd321, -16'sd207, -16'sd144
+    }
 ) (
-    input  wire                     clk,
-    input  wire                     reset_n,   // active-low async
+    input  wire clk,
+    input  wire reset_n,
+    input  wire sample_en,
     input  wire signed [DATA_W-1:0] sample_in,
-    output reg  signed [DATA_W+COEFF_W+ACC_GUARD-1:0] acc_out, // widened accumulator
-    output reg  signed [DATA_W+ACC_GUARD-1:0]         y_out    // scaled back to Q1.15
+    output reg  signed [DATA_W+COEFF_W+ACC_GUARD-1:0] acc_out,
+    output reg  signed [DATA_W+COEFF_W+ACC_GUARD-15-1:0] y_out,
+    output reg  out_valid
 );
 
-    // Shift register for past samples
+    localparam integer ACC_W     = DATA_W + COEFF_W + ACC_GUARD;
+    localparam integer Y_W       = DATA_W + COEFF_W + ACC_GUARD - 15;
+    localparam integer TAP_IDX_W = (N_TAPS <= 2) ? 1 : $clog2(N_TAPS);
+
     reg signed [DATA_W-1:0] x [0:N_TAPS-1];
+    reg signed [ACC_W-1:0]  acc_work;
+    reg signed [ACC_W-1:0]  mac_next;
+    reg [TAP_IDX_W-1:0]     tap_idx;
+    reg                     mac_busy;
 
     integer i;
-    always @(posedge clk or negedge reset_n) begin
+    always @(posedge clk) begin
+        out_valid <= 1'b0;
+
         if (!reset_n) begin
-            for (i = 0; i < N_TAPS; i = i + 1)
+            acc_out   <= '0;
+            y_out     <= '0;
+            acc_work  <= '0;
+            tap_idx   <= '0;
+            mac_busy  <= 1'b0;
+            out_valid <= 1'b0;
+            for (i = 0; i < N_TAPS; i = i + 1) begin
                 x[i] <= '0;
+            end
+        end else if (!mac_busy) begin
+            if (sample_en) begin
+                x[0] <= sample_in;
+                for (i = 1; i < N_TAPS; i = i + 1) begin
+                    x[i] <= x[i-1];
+                end
+
+                acc_work <= '0;
+                tap_idx  <= '0;
+                mac_busy <= 1'b1;
+            end
         end else begin
-            // shift down, x[0] is newest
-            x[0] <= sample_in;
-            for (i = 1; i < N_TAPS; i = i + 1)
-                x[i] <= x[i-1];
-        end
-    end
+            mac_next = acc_work + (x[tap_idx] * COEFFS[tap_idx]);
 
-    // Multiply-accumulate
-    reg signed [DATA_W+COEFF_W-1:0] prod [0:N_TAPS-1];
-    reg signed [DATA_W+COEFF_W+ACC_GUARD-1:0] sum;
-
-    always @* begin
-        for (i = 0; i < N_TAPS; i = i + 1)
-            prod[i] = x[i] * COEFFS[i];
-
-        sum = '0;
-        for (i = 0; i < N_TAPS; i = i + 1)
-            sum = sum + prod[i];
-    end
-
-    // Register outputs; right-shift by 15 to return to Q1.15
-    always @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
-            acc_out <= '0;
-            y_out   <= '0;
-        end else begin
-            acc_out <= sum;
-            y_out   <= sum >>> 15; // arithmetic shift, preserves sign
+            if (tap_idx == N_TAPS-1) begin
+                acc_out   <= mac_next;
+                y_out     <= mac_next[Y_W+15-1:15];
+                acc_work  <= '0;
+                mac_busy  <= 1'b0;
+                out_valid <= 1'b1;
+            end else begin
+                acc_work <= mac_next;
+                tap_idx  <= tap_idx + 1'b1;
+            end
         end
     end
 

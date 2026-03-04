@@ -55,3 +55,15 @@ dkms.conf
 *.dwo
 /src/fpga/__pycache__
 .vscode/
+.venv
+build/
+*.html
+*.log
+*.txt
+*.tex
+*.png
+*.aux
+*.toc
+*.gz
+*.fdb_latexmk
+*.fls

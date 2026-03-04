@@ -7,7 +7,7 @@ module w25q64_page_logger_tb;
     reg reset_n = 0;
 
     reg [7:0] buf_mem [0:255];
-    reg [7:0] buf_addr;
+    wire [7:0] buf_addr;
     wire [7:0] buf_dout = buf_mem[buf_addr];
 
     reg buf_full = 0;

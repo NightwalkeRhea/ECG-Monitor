@@ -17,7 +17,7 @@ module spi_byte_shifter #(
     reg [3:0] bitcnt;
     reg [$clog2(CLK_DIV*2)-1:0] divcnt;
 
-    always @(posedge clk or negedge reset_n) begin
+    always @(posedge clk) begin
         if (!reset_n) begin
             busy <= 0; done <= 0; sck <= 0; mosi <= 0; rx_byte <= 0;
             bitcnt <= 0; divcnt <= 0; shreg <= 0;

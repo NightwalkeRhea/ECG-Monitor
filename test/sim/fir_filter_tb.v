@@ -7,34 +7,52 @@ module fir_filter_tb;
 
     reg clk = 0;
     reg reset_n = 0;
+    reg sample_en = 0;
     reg signed [15:0] sample_in;
-    wire signed [21:0] acc_out;
-    wire signed [21:0] y_out;
+    wire signed [37:0] acc_out;
+    wire signed [22:0] y_out;
+    wire out_valid;
 
     always #10 clk = ~clk; // 50 MHz
+
+    task send_sample(input signed [15:0] value);
+        begin
+            @(posedge clk);
+            sample_in <= value;
+            sample_en <= 1'b1;
+            @(posedge clk);
+            sample_en <= 1'b0;
+            sample_in <= 16'sd0;
+        end
+    endtask
 
     fir_filter dut (
         .clk(clk),
         .reset_n(reset_n),
+        .sample_en(sample_en),
         .sample_in(sample_in),
         .acc_out(acc_out),
-        .y_out(y_out)
+        .y_out(y_out),
+        .out_valid(out_valid)
     );
 
     integer i;
 
     initial begin
         reset_n = 0;
+        sample_en = 0;
         sample_in = 0;
         #100;
         reset_n = 1;
 
-        // impulse response
-        sample_in = 16'sd1000;
-        #20 sample_in = 0;
+        // Accept one impulse sample, then feed zeros at a rate the sequential MAC can sustain.
+        send_sample(16'sd1000);
+        for (i = 0; i < 8; i = i + 1) begin
+            repeat (40) @(posedge clk);
+            send_sample(16'sd0);
+        end
 
-        for (i = 0; i < 100; i = i + 1)
-            #20;
+        repeat (60) @(posedge clk);
 
         $finish;
     end

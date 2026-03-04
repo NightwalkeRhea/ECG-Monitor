@@ -16,6 +16,13 @@ module spi_slave_rx (
     output reg         data_valid
 );
 
+    // Local reset synchronizers for each clock domain.
+    reg [1:0] rst_spi_sync;
+    reg [1:0] rst_sys_sync;
+
+    wire rst_n_spi = rst_spi_sync[1];
+    wire rst_n_sys = rst_sys_sync[1];
+
     // -----------------------------
     // SPI clock domain registers
     // -----------------------------
@@ -29,13 +36,31 @@ module spi_slave_rx (
     // ack toggle synchronized into SPI domain
     reg ack_sync1_spi, ack_sync2_spi;
     reg ack_seen_spi;
-    
-    // ACK toggle generated in system domain (forward declaration for use in SPI domain)
-    wire ack_toggle_sys; 
 
-    // Sync ACK toggle into SPI domain
+    // ACK toggle generated in system domain (forward declaration for use in SPI domain)
+    wire ack_toggle_sys;
+
+    // Reset deassertion synchronized into SPI domain.
     always @(posedge spi_sclk or negedge rst_n) begin
         if (!rst_n) begin
+            rst_spi_sync <= 2'b00;
+        end else begin
+            rst_spi_sync <= {rst_spi_sync[0], 1'b1};
+        end
+    end
+
+    // Reset deassertion synchronized into system domain.
+    always @(posedge clk_system or negedge rst_n) begin
+        if (!rst_n) begin
+            rst_sys_sync <= 2'b00;
+        end else begin
+            rst_sys_sync <= {rst_sys_sync[0], 1'b1};
+        end
+    end
+
+    // Sync ACK toggle into SPI domain.
+    always @(posedge spi_sclk) begin
+        if (!rst_n_spi) begin
             ack_sync1_spi <= 1'b0;
             ack_sync2_spi <= 1'b0;
         end else begin
@@ -44,9 +69,9 @@ module spi_slave_rx (
         end
     end
 
-    // Main SPI capture (Mode 0: sample MOSI on rising edge)
-    always @(posedge spi_sclk or negedge rst_n) begin
-        if (!rst_n) begin
+    // Main SPI capture (Mode 0: sample MOSI on rising edge).
+    always @(posedge spi_sclk) begin
+        if (!rst_n_spi) begin
             rx_shift       <= 16'd0;
             bit_cnt        <= 4'd0;
             data_latch_spi <= 16'd0;
@@ -55,22 +80,22 @@ module spi_slave_rx (
             ack_seen_spi   <= 1'b0;
         end else begin
             // detect ack change (means system consumed data)
-            if (ack_sync2_spi!= ack_seen_spi) begin
+            if (ack_sync2_spi != ack_seen_spi) begin
                 ack_seen_spi <= ack_sync2_spi;
-                busy_holding <= 1'b0;        // allow next word
+                busy_holding <= 1'b0;
             end
 
             if (spi_cs_n) begin
-                bit_cnt <= 4'd0;
-                busy_holding <= 1'b0;   // release it on frame end, this resets on cs high to avoid stalled handshake if sclk stops early.
+                bit_cnt      <= 4'd0;
+                busy_holding <= 1'b0;
             end else if (!busy_holding) begin
                 // shift in bits MSB-first
                 rx_shift <= {rx_shift[14:0], spi_mosi};
 
                 if (bit_cnt == 4'd15) begin
-                    data_latch_spi <= {rx_shift[14:0], spi_mosi}; // complete 16-bit word
-                    req_toggle_spi <= ~req_toggle_spi;           // request transfer
-                    busy_holding   <= 1'b1;                      // hold until ack
+                    data_latch_spi <= {rx_shift[14:0], spi_mosi};
+                    req_toggle_spi <= ~req_toggle_spi;
+                    busy_holding   <= 1'b1;
                     bit_cnt        <= 4'd0;
                 end else begin
                     bit_cnt <= bit_cnt + 4'd1;
@@ -89,9 +114,9 @@ module spi_slave_rx (
     reg ack_toggle_sys_reg;
     assign ack_toggle_sys = ack_toggle_sys_reg;
 
-    // Synchronize req toggle into system domain
-    always @(posedge clk_system or negedge rst_n) begin
-        if (!rst_n) begin
+    // Synchronize req toggle into system domain.
+    always @(posedge clk_system) begin
+        if (!rst_n_sys) begin
             req_sync1_sys <= 1'b0;
             req_sync2_sys <= 1'b0;
         end else begin
@@ -100,24 +125,24 @@ module spi_slave_rx (
         end
     end
 
-    // Capture data on req toggle change, then toggle ack
-    always @(posedge clk_system or negedge rst_n) begin
-        if (!rst_n) begin
-            ecg_data_out   <= 16'd0;
-            data_valid     <= 1'b0;
-            req_prev_sys   <= 1'b0;
+    // Capture data on req toggle change, then toggle ack.
+    always @(posedge clk_system) begin
+        if (!rst_n_sys) begin
+            ecg_data_out       <= 16'd0;
+            data_valid         <= 1'b0;
+            req_prev_sys       <= 1'b0;
             ack_toggle_sys_reg <= 1'b0;
         end else begin
             data_valid <= 1'b0;
 
-            if (req_sync2_sys!= req_prev_sys) begin
+            if (req_sync2_sys != req_prev_sys) begin
                 req_prev_sys <= req_sync2_sys;
 
-                // Safe because SPI side holds data_latch_spi stable until ack toggles
+                // Safe because SPI side holds data_latch_spi stable until ack toggles.
                 ecg_data_out <= data_latch_spi;
                 data_valid   <= 1'b1;
 
-                // Acknowledge consumption
+                // Acknowledge consumption.
                 ack_toggle_sys_reg <= ~ack_toggle_sys_reg;
             end
         end

@@ -1,84 +1,125 @@
-// =================================================================
-// Placeholder Module Definitions (Must be written in full Verilog)
-// =================================================================
+// Basic ECG DSP pipeline.
+// This is still a simplified detector, but it now uses the FIR result-valid pulse
+// instead of assuming a single-cycle filter latency.
 
 module dsp_pipeline_qrs #(
     parameter integer FS_HZ = 250,
-    parameter integer QRS_THRESH = 16'sd1200  // placeholder threshold in "counts"
+    parameter [15:0]  QRS_THRESH = 16'd1200
 ) (
-    input wire clk_core,
-    input wire rst_n,
-
-    input wire signed [15:0] raw_in,
-    input wire valid_in,
-
+    input  wire clk_core,
+    input  wire rst_n,
+    input  wire signed [15:0] raw_in,
+    input  wire valid_in,
     output reg  signed [15:0] filtered_out,
-    output reg         qrs_detected_out,
-    output reg  [7:0]  current_bpm_out,
-    output reg         log_trigger_out,
-    // expose “word to log” for the page buffer
-    output reg  [15:0]       log_word_out,
-    output reg               log_word_valid
+    output reg                qrs_detected_out,
+    output reg  [7:0]         current_bpm_out,
+    output reg                log_trigger_out,
+    output reg  [15:0]        log_word_out,
+    output reg                log_word_valid
 );
-    // FIR outputs from the module
-    wire signed [15:0+6-1:0] fir_y;      // DATA_W+ACC_GUARD (DATA_W=16, ACC_GUARD default 6)
-    wire signed [15:0] fir_y_q15;  // take lower 16 bits as a simple placeholder
-    // my FIR has no enable; it shifts every clk.
-    // To keep it deterministic with valid_in, we feed sample_in = raw_in only when valid, else 0.
-    wire signed [15:0] fir_sample_in = valid_in ? raw_in : 16'sd0;
+
+    localparam integer BPM_NUM = 60 * FS_HZ;
+
+    wire signed [37:0] fir_acc;
+    wire signed [22:0] fir_y;
+    wire               fir_out_valid;
+
+    reg  above;
+    reg  [15:0] rr_samples;
+    reg  [15:0] bpm_div_den;
+    reg  [15:0] bpm_div_rem;
+    reg  [7:0]  bpm_div_q;
+    reg         bpm_div_busy;
+
+    wire [15:0] rr_interval = rr_samples + 16'd1;
+
+    function signed [15:0] sat23_to16;
+        input signed [22:0] value;
+        begin
+            if (value > 23'sd32767) begin
+                sat23_to16 = 16'sd32767;
+            end else if (value < -23'sd32768) begin
+                sat23_to16 = -16'sd32768;
+            end else begin
+                sat23_to16 = value[15:0];
+            end
+        end
+    endfunction
+
+    function [15:0] abs16;
+        input signed [15:0] value;
+        begin
+            if (value[15]) begin
+                abs16 = (~value) + 16'd1;
+            end else begin
+                abs16 = value[15:0];
+            end
+        end
+    endfunction
 
     fir_filter fir_inst (
-        .clk      (clk_core),
-        .reset_n  (rst_n),
-        .sample_in(fir_sample_in),
-        .acc_out  (),
-        .y_out    (fir_y)
+        .clk       (clk_core),
+        .reset_n   (rst_n),
+        .sample_en (valid_in),
+        .sample_in (raw_in),
+        .acc_out   (fir_acc),
+        .y_out     (fir_y),
+        .out_valid (fir_out_valid)
     );
-    assign fir_y_q15 = fir_y[15:0];
-    // Simple QRS detector placeholder: rising-over-threshold with hysteresis
-    reg above;
-    reg [15:0] rr_samples;  // counts valid_in pulses between QRS events
 
-    // bpm = 60*FS / RR  =>  (60*250)=15000 / RR
-    localparam integer BPM_NUM = 60*FS_HZ; // 15000
-
-    always @(posedge clk_core or negedge rst_n) begin
+    always @(posedge clk_core) begin
         if (!rst_n) begin
-            filtered_out      <= 16'sd0;
-            qrs_detected_out  <= 1'b0;
-            current_bpm_out   <= 8'd75;
-            log_trigger_out   <= 1'b0;
-            log_word_out      <= 16'd0;
-            log_word_valid    <= 1'b0;
-            above             <= 1'b0;
-            rr_samples        <= 16'd0;
+            filtered_out     <= 16'sd0;
+            qrs_detected_out <= 1'b0;
+            current_bpm_out  <= 8'd0;
+            log_trigger_out  <= 1'b0;
+            log_word_out     <= 16'd0;
+            log_word_valid   <= 1'b0;
+            above            <= 1'b0;
+            rr_samples       <= 16'd0;
+            bpm_div_den      <= 16'd0;
+            bpm_div_rem      <= 16'd0;
+            bpm_div_q        <= 8'd0;
+            bpm_div_busy     <= 1'b0;
         end else begin
             qrs_detected_out <= 1'b0;
             log_trigger_out  <= 1'b0;
             log_word_valid   <= 1'b0;
-            if (valid_in) begin
-                // capture filtered output only when sample is valid
-                filtered_out <= fir_y_q15;
-                // log raw samples (simplest, most debuggable)
-                log_word_out   <= raw_in;
+
+            if (bpm_div_busy) begin
+                if ((bpm_div_den != 16'd0) && (bpm_div_rem >= bpm_div_den) && (bpm_div_q != 8'hFF)) begin
+                    bpm_div_rem <= bpm_div_rem - bpm_div_den;
+                    bpm_div_q   <= bpm_div_q + 8'd1;
+                end else begin
+                    current_bpm_out <= bpm_div_q;
+                    bpm_div_busy    <= 1'b0;
+                end
+            end
+
+            if (fir_out_valid) begin
+                filtered_out   <= sat23_to16(fir_y);
+                log_word_out   <= sat23_to16(fir_y);
                 log_word_valid <= 1'b1;
-                // RR counter in sample domain
-                if (rr_samples != 16'hFFFF) rr_samples <= rr_samples + 16'd1;
-                // threshold crossing detect
-                if (!above && (fir_y_q15 > QRS_THRESH)) begin
+
+                if (rr_samples != 16'hFFFF) begin
+                    rr_samples <= rr_interval;
+                end
+
+                if (!above && (abs16(sat23_to16(fir_y)) > QRS_THRESH)) begin
                     above            <= 1'b1;
                     qrs_detected_out <= 1'b1;
-                    log_trigger_out  <= 1'b1; // placeholder “event”
-                    // avoid division by 0/1 nonsense
-                    if (rr_samples > 16'd5) begin
-                        current_bpm_out <= (BPM_NUM / rr_samples > 255) ? 8'hFF : (BPM_NUM / rr_samples)[7:0];
-                    end
-                    rr_samples <= 16'd0;
-                end else if (above && (fir_y_q15 < (QRS_THRESH >>> 1))) begin
-                    // hysteresis: drop below half threshold to re-arm
+                    log_trigger_out  <= 1'b1;
+                    rr_samples       <= 16'd0;
+
+                    bpm_div_den  <= rr_interval;
+                    bpm_div_rem  <= BPM_NUM[15:0];
+                    bpm_div_q    <= 8'd0;
+                    bpm_div_busy <= 1'b1;
+                end else if (above && (abs16(sat23_to16(fir_y)) < (QRS_THRESH >> 1))) begin
                     above <= 1'b0;
                 end
             end
         end
     end
+
 endmodule

@@ -1,32 +1,41 @@
-// ecg_system.cst
-// Constraints file for Tang Nano 9K (GW1NR-9) using user I/O pads
+// Tang Nano 9K (GW1NR-9) pin constraints for the external MCU SPI,
+// external W25Q64FV flash, and alarm output.
+//
+// Notes:
+// - Use the on-board 27 MHz oscillator on pin 52.
+// - Keep timing constraints in a separate .sdc file.
 
-// Define Voltage Standard (3.3V LVCMOS is standard for interfacing external chips)
-// All pads must reference this standard for correct pin configuration.
+// 1. System clock input
+IO_LOC "CLK_27MHZ" 52;
+IO_PORT "CLK_27MHZ" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// 1. System Clock
-IO_LOC "CLK_27MHZ" PIN35;
-IO_PORT "CLK_27MHZ" IO_TYPE=LVCMOS33;
-CREATE_CLOCK -name {clk_27mhz_inst} -period 37.037 [get_ports {CLK_27MHZ}];
-// 2. MCU SPI Interface (Slave)
-IO_LOC "SPI_SCLK_IN" IOL10A;
+// 1b. Active-low reset from on-board S1 button (1.8 V bank)
+IO_LOC "RST_N" 3;
+IO_PORT "RST_N" IO_TYPE=LVCMOS18 PULL_MODE=UP;
+
+// 2. MCU -> FPGA SPI slave interface
+IO_LOC "SPI_SCLK_IN" 19;
 IO_PORT "SPI_SCLK_IN" IO_TYPE=LVCMOS33;
-IO_LOC "SPI_MOSI_IN" IOL9B;
+
+IO_LOC "SPI_MOSI_IN" 20;
 IO_PORT "SPI_MOSI_IN" IO_TYPE=LVCMOS33;
-IO_LOC "SPI_CS_N_IN" IOL8B;
-IO_PORT "SPI_CS_N_IN" IO_TYPE=LVCMOS33;
-// 3. W25Q64 Flash Interface (Master)
-IO_LOC "FLASH_SCLK_OUT" IOL7B;
-IO_PORT "FLASH_SCLK_OUT" IO_TYPE=LVCMOS33;
-IO_LOC "FLASH_MOSI_OUT" IOL6B;
-IO_PORT "FLASH_MOSI_OUT" IO_TYPE=LVCMOS33;
-IO_LOC "FLASH_MISO_IN" IOL5B;
-IO_PORT "FLASH_MISO_IN" IO_TYPE=LVCMOS33;
-IO_LOC "FLASH_CS_N_OUT" IOL4B;
-IO_PORT "FLASH_CS_N_OUT" IO_TYPE=LVCMOS33;
-// 4. Actuator Output (Alarm Signal)
-IO_LOC "ALARM_OUT" IOL16B;
-IO_PORT "ALARM_OUT" IO_TYPE=LVCMOS33;
-// pullups for cs lines, to prevent floating at reset
+
+IO_LOC "SPI_CS_N_IN" 25;
 IO_PORT "SPI_CS_N_IN" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// 3. FPGA -> external W25Q64FV SPI master interface
+IO_LOC "FLASH_SCLK_OUT" 26;
+IO_PORT "FLASH_SCLK_OUT" IO_TYPE=LVCMOS33;
+
+IO_LOC "FLASH_MOSI_OUT" 27;
+IO_PORT "FLASH_MOSI_OUT" IO_TYPE=LVCMOS33;
+
+IO_LOC "FLASH_MISO_IN" 28;
+IO_PORT "FLASH_MISO_IN" IO_TYPE=LVCMOS33;
+
+IO_LOC "FLASH_CS_N_OUT" 29;
 IO_PORT "FLASH_CS_N_OUT" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// 4. Alarm output to buzzer/LED or MCU input
+IO_LOC "ALARM_OUT" 30;
+IO_PORT "ALARM_OUT" IO_TYPE=LVCMOS33;

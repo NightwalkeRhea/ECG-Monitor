@@ -22,7 +22,7 @@ module page_buffer_256B (
 
     assign buf_dout = mem[buf_addr]; // Asynchronous read for logger (simple dual port read)
 
-    always @(posedge clk or negedge reset_n) begin
+    always @(posedge clk) begin
         if (!reset_n) begin
             wr_ptr   <= 8'd0;
             buf_full <= 1'b0;
