@@ -2,8 +2,25 @@
 
 #include "common.h"
 #include "gpio.h"
+#include "clock_systick.h"
 #include "mcu_definition.h"
 #include <stdbool.h>
+
+#ifndef __WFI
+#define __WFI() __asm volatile ("wfi")
+#endif
+
+#ifndef __disable_irq
+#define __disable_irq() __asm volatile ("cpsid i" : : : "memory")
+#endif
+
+#ifndef __enable_irq
+#define __enable_irq() __asm volatile ("cpsie i" : : : "memory")
+#endif
+
+#ifndef ENABLE_UART_TELEMETRY
+#define ENABLE_UART_TELEMETRY (0)
+#endif
 
 // --- Global System State Variables ---
 // These variables store the latest data, accessible by both the ISR and the main loop.
@@ -24,7 +41,7 @@ const uint16_t BPM_THRESHOLD = 120;    // Alarm threshold for tachycardia (e.g.,
  * @brief Reads processed data and BPM from the FPGA.
  * @return Simulated BPM value.
  */
-static uint16_t FPGA_BPM_Read(int16_t raw_sample, int16_t *filtered_out) {
+static uint16_t FPGA_BPM_Read(int16_t raw_sample, volatile int16_t *filtered_out) {
     // --- SIMULATION/PLACEHOLDER LOGIC ---
     // In a final embedded system:
     // 1. MCU might poll an FPGA register via SPI read command.
@@ -46,19 +63,26 @@ static uint16_t FPGA_BPM_Read(int16_t raw_sample, int16_t *filtered_out) {
 
 
 // ----------------------------------------------------------------------
-// SysTick Interrupt Service Routine Handler (Executed at 250 Hz)
+// Periodic sampling work, triggered by the 250 Hz SysTick flag
 // ----------------------------------------------------------------------
 
 /**
- * @brief Main sampling and processing handler, executed precisely by the SysTick ISR.
+ * @brief Main sampling and processing handler, called from the main loop
+ *        whenever the SysTick flag indicates a new sample period.
  * 
  * This function orchestrates the real-time data flow: 
  * ADC Read -> SPI Send -> Actuation Check -> UART Transmit.
  */
 void Sampling_ISR_Handler(void) {
+    int16_t sample = 0;
+
     // 1. Read Analog Data (I2C Master to ADS1115 Slave)
-    // The result is a 16-bit signed integer, zero-centered (DC offset removed).
-    g_raw_adc_sample = ADC_Read_Sample(); 
+    // The non-blocking state machine returns true only when a fresh conversion
+    // is ready, so we can keep each scheduler step bounded in time.
+    if (!Sampling_Task(&sample)) {
+        return;
+    }
+    g_raw_adc_sample = sample;
 
     // 2. Send Raw Data to FPGA for real-time DSP (SPI Master to FPGA Slave)
     // The FPGA starts processing (Filtering, Squaring, MWI).
@@ -77,9 +101,12 @@ void Sampling_ISR_Handler(void) {
         Deactivate_Alarm();
     }
     
-    // 5. Transmit Filtered Data and BPM to PC (UART/ASC)
-    // This allows the user to plot the data and monitor the heart rate in a terminal.
+    // 5. Optional telemetry path.
+    // Keep this disabled by default until USIC CH0 UART mode switching is
+    // fully validated in hardware.
+    #if ENABLE_UART_TELEMETRY
     PC_Transmit_Filtered_Data(g_filtered_data, g_current_bpm);
+    #endif
 }
 
 
@@ -96,11 +123,24 @@ int main(void) {
 
     // 2. Main Execution Loop
     while (true) {
-        // Use the WFI (Wait For Interrupt) instruction to put the Cortex-M0 core 
-        // into a low-power Sleep mode. The core will immediately wake up when the 
-        // SysTick ISR (at 250 Hz) or any other enabled interrupt occurs.
-        // This dramatically reduces power consumption while maintaining real-time responsiveness.
-        __WFI(); 
+        uint32_t pending_ticks = 0U;
+
+        __disable_irq();
+        pending_ticks = g_sample_tick;
+        g_sample_tick = 0U;
+        __enable_irq();
+
+        while (pending_ticks-- != 0U) {
+            Sampling_ISR_Handler();
+        }
+
+        // Avoid sleeping if a new tick arrived after the snapshot.
+        if (g_sample_tick == 0U) {
+            // Use the WFI (Wait For Interrupt) instruction to put the Cortex-M0 core
+            // into a low-power Sleep mode. The core will immediately wake up when the
+            // SysTick ISR (at 250 Hz) or any other enabled interrupt occurs.
+            __WFI();
+        }
         
         // After the ISR runs, execution returns here to wait for the next interrupt.
     }

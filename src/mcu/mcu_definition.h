@@ -7,10 +7,13 @@
 // MCU CORE AND SYSTEM DEFINITIONS (XMC1100)
 // -----------------------------------------------------------------------------
 
-// System Clock Definition (Assumption: 64 MHz Peripheral Clock frequency)
-#define PERIPHERAL_CLK_FREQ    64000000UL // 64MHz DCO1, ranging from 125 kHz to 64 MHz. 
-#define SAMPLE_RATE_HZ         250UL  // adjust with ADS1115 
-#define SYSTICK_RELOAD_VALUE   (PERIPHERAL_CLK_FREQ / SAMPLE_RATE_HZ)
+// Clock definitions for the current firmware assumptions.
+// SysTick uses the processor clock when SYST_CSR.CLKSOURCE = 1, while
+// peripheral timing (e.g. USIC) may run from a different clock domain.
+#define CPU_CLK_FREQ           32000000UL
+#define PERIPHERAL_CLK_FREQ    64000000UL
+#define SAMPLE_RATE_HZ         250UL
+#define SYSTICK_RELOAD_VALUE   (CPU_CLK_FREQ / SAMPLE_RATE_HZ)
 
 // Base Addresses for Major Peripherals
 #define SCU_BASE               0x40010000UL // System Control Unit, end address 4001 FFFFH
@@ -29,10 +32,13 @@
 // -----------------------------------------------------------------------------
 
 // SCU Register for Peripheral Clock Gating
-#define SCU_CGATCLR0           (*(volatile uint32_t*)(SCU_BASE + 0x10UL))
-#define SCU_CGATSET0           (*(volatile uint32_t*)(SCU_BASE + 0x0CUL))
+#define SCU_PASSWD             (*(volatile uint32_t*)(SCU_BASE + 0x024UL))
+#define SCU_CGATSTAT0          (*(volatile uint32_t*)(SCU_BASE + 0x308UL))
+#define SCU_CGATCLR0           (*(volatile uint32_t*)(SCU_BASE + 0x310UL))
+#define SCU_CGATSET0           (*(volatile uint32_t*)(SCU_BASE + 0x30CUL))
 // GPIO Control Registers
 #define P0_IOCR0               (*(volatile uint32_t*)(PORT0_BASE + 0x10UL)) // P0.0 to P0.3 
+#define P0_IOCR4               (*(volatile uint32_t*)(PORT0_BASE + 0x14UL)) // P0.4 to P0.7
 #define P0_IOCR8               (*(volatile uint32_t*)(PORT0_BASE + 0x18UL)) // P0.8 to P0.11
 #define P0_IOCR12              (*(volatile uint32_t*)(PORT0_BASE + 0x1CUL)) // P0.12 to P0.15
 #define P1_IOCR0               (*(volatile uint32_t*)(PORT1_BASE + 0x10UL)) // P1.0 to P1.3
