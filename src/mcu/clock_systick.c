@@ -3,12 +3,12 @@
 #include <stdint.h>
 
 volatile uint32_t g_systick_ticks = 0;   // increments every SysTick (4ms)
-volatile uint8_t  g_sample_tick   = 0;   // flag for main loop (optional)
+volatile uint32_t g_sample_tick   = 0;   // pending sample periods for main loop
 
 void SysTick_Init(void)
 {
-    // SYSTICK_RELOAD_VALUE should be defined as (PERIPHERAL_CLK_FREQ / 250U)
-    // so the interrupt rate is 250 Hz (4 ms).
+    // SYSTICK_RELOAD_VALUE is derived from the CPU clock because CLKSOURCE=1
+    // selects the processor clock for the SysTick counter.
     SYST_RVR = (uint32_t)(SYSTICK_RELOAD_VALUE - 1U);
     SYST_CVR = 0U;
 
@@ -19,13 +19,8 @@ void SysTick_Init(void)
 void SysTick_Handler(void)
 {
     g_systick_ticks++;
-    g_sample_tick = 1U;          // let main loop run sampling work
+    if (g_sample_tick != 0xFFFFFFFFUL) {
+        g_sample_tick++;
+    }
     // DO NOT do long I2C/SPI transactions here if you can avoid it.
-}
-
-// User-defined sampling handler (to be implemented in main.c)
-void Sampling_ISR_Handler(void) {
-    // TODO
-    // Placeholder for application logic (ADC read, data processing, SPI send, actuation check).
-    // This function must be implemented in main.c or a separate data processing file.
 }

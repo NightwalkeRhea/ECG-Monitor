@@ -2,16 +2,82 @@
 #include "usic.h"
 #include "clock_systick.h"
 #include "gpio.h" // Assuming this driver exists
+#include <stddef.h>
 
 // ADS1115 Constants (defined here for usage clarity)
 #define ADS1115_SLAVE_ADDR  (0x48U)
 #define ADS1115_CONV_REG    (0x00U)
 #define ADS1115_CONFIG_REG  (0x01U)
-#define ADS1115_CONFIG_WORD (0xC383U) // Single-Shot, AIN0/GND, PGA +/-4.096V, 128SPS
+#define ADS1115_CONFIG_WORD (0xC3A3U) // Single-shot, AIN0/GND, PGA +/-4.096V, 250SPS
+#define ADS1115_OS_READY_MASK (0x80U)
+#define ADS1115_OS_POLL_LIMIT (32U)
 
 // XMC SPI Slave Select Pins
 #define CS_FPGA_SELECT (0U)
 #define CS_FLASH_SELECT (1U)
+
+#ifndef DIGITAL_DC_OFFSET
+#define DIGITAL_DC_OFFSET (0)
+#endif
+
+static int16_t g_last_adc_sample = 0;
+
+static bool ADS1115_StartSingleShot(void) {
+    uint16_t config_word_start = (uint16_t)(ADS1115_CONFIG_WORD | (1U << 15));
+
+    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
+    USIC_I2C_SendByte((uint8_t)(config_word_start >> 8), 0);
+    USIC_I2C_SendByte((uint8_t)(config_word_start & 0xFFU), 1);
+
+    if (USIC_I2C_GetErrorFlags() != 0U) {
+        USIC_I2C_ClearErrorFlags();
+        return false;
+    }
+
+    return true;
+}
+
+static bool ADS1115_ReadConfigMSB(uint8_t *status_msb) {
+    if (status_msb == NULL) {
+        return false;
+    }
+
+    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
+    USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
+
+    *status_msb = USIC_I2C_ReadByte(1, 0);
+    (void)USIC_I2C_ReadByte(0, 1); // NACK + STOP on the LSB
+
+    if (USIC_I2C_GetErrorFlags() != 0U) {
+        USIC_I2C_ClearErrorFlags();
+        return false;
+    }
+
+    return true;
+}
+
+static bool ADS1115_ReadConversionWord(int16_t *raw_out) {
+    uint8_t msb;
+    uint8_t lsb;
+
+    if (raw_out == NULL) {
+        return false;
+    }
+
+    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG);
+    USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
+
+    msb = USIC_I2C_ReadByte(1, 0);
+    lsb = USIC_I2C_ReadByte(0, 1); // NACK + STOP
+
+    if (USIC_I2C_GetErrorFlags() != 0U) {
+        USIC_I2C_ClearErrorFlags();
+        return false;
+    }
+
+    *raw_out = (int16_t)(((uint16_t)msb << 8) | (uint16_t)lsb);
+    return true;
+}
 
 void System_Init(void) {
     // 1. Enable USIC Clock
@@ -37,45 +103,40 @@ void System_Init(void) {
     // MSB, then LSB, then STOP
     USIC_I2C_SendByte(config_msb, 0); 
     USIC_I2C_SendByte(config_lsb, 1); // True sends STOP condition
+    USIC_I2C_ClearErrorFlags();
 }
 
 int16_t ADC_Read_Sample(void)
 {
-    // 1) Trigger single-shot by writing config with OS=1 (bit 15)
-    uint16_t config_word_start = (uint16_t)(ADS1115_CONFIG_WORD | (1U << 15));
+    uint32_t poll_count = ADS1115_OS_POLL_LIMIT;
+    uint8_t status_msb = 0U;
+    int16_t raw = 0;
 
-    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
-    USIC_I2C_SendByte((uint8_t)(config_word_start >> 8), 0);
-    USIC_I2C_SendByte((uint8_t)(config_word_start & 0xFFU), 1); // STOP
+    if (!ADS1115_StartSingleShot()) {
+        return g_last_adc_sample;
+    }
 
-    // 2) Wait conversion time (simple version).
-    // If DR=128 SPS, conversion ~7.8ms. If DR=250 SPS, ~4ms, etc.
-    // Replace this with proper OS-bit polling later.
-    for (volatile uint32_t i = 0; i < 50000; i++) { __asm__("nop"); }
+    while (poll_count-- != 0U) {
+        if (!ADS1115_ReadConfigMSB(&status_msb)) {
+            return g_last_adc_sample;
+        }
 
-    // 3) Set pointer to conversion register (0x00)
-    USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG);
+        if ((status_msb & ADS1115_OS_READY_MASK) != 0U) {
+            if (!ADS1115_ReadConversionWord(&raw)) {
+                return g_last_adc_sample;
+            }
 
-    // 4) Repeated START + Read two bytes
-    USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
+            g_last_adc_sample = (int16_t)(raw - (int16_t)DIGITAL_DC_OFFSET);
+            return g_last_adc_sample;
+        }
+    }
 
-    uint8_t msb = USIC_I2C_ReadByte(1, 0); // ACK (more bytes coming)
-    uint8_t lsb = USIC_I2C_ReadByte(0, 1); // NACK (last byte) + STOP
-
-    int16_t raw = (int16_t)((uint16_t)((uint16_t)msb << 8) | (uint16_t)lsb);
-
-    // 5) Optional: DC offset removal (make it a tunable constant!)
-    // Better approach: estimate baseline digitally (moving average) instead of hardcoding.
-    #ifndef DIGITAL_DC_OFFSET
-    #define DIGITAL_DC_OFFSET (0)
-    #endif
-
-    return (int16_t)(raw - (int16_t)DIGITAL_DC_OFFSET);
+    return g_last_adc_sample;
 }
 
 void FPGA_Send_Data(int16_t zero_centered_sample) {
     // Transmit the 16-bit sample using the SPI Master on USIC0_CH1.
-    // CS_FPGA_SELECT (P0.0) is automatically toggled by the underlying SPI driver.
+    // CS_FPGA_SELECT (P0.0) is currently driven manually inside the SPI driver.
     USIC_SPI_Transfer((uint16_t)zero_centered_sample, CS_FPGA_SELECT);
 }
 
@@ -103,34 +164,48 @@ void PC_Transmit_Filtered_Data(int16_t filtered_data, uint16_t bpm) {
     USIC_SetMode_I2C_CH0(); 
 }
 
-// Call this from your main loop when g_sample_tick == 1
-// (clear g_sample_tick after calling)
-int16_t Sampling_Task(void)
+// Non-blocking sampling state machine.
+// Returns true only when a new sample is available in *sample_out.
+bool Sampling_Task(int16_t *sample_out)
 {
-    static uint8_t phase = 0;  // 0=trigger, 1=read
-    int16_t sample = 0;
+    static bool conversion_primed = false;
+    uint8_t status_msb = 0U;
+    int16_t raw = 0;
+    int16_t converted = 0;
 
-    if (phase == 0) {
-        // Trigger conversion only (no waiting)
-        uint16_t cfg = (uint16_t)(ADS1115_CONFIG_WORD | (1U << 15));
-
-        USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONFIG_REG);
-        USIC_I2C_SendByte((uint8_t)(cfg >> 8), 0);
-        USIC_I2C_SendByte((uint8_t)(cfg & 0xFFU), 1); // STOP
-
-        phase = 1;
-        return 0; // no new sample yet
-    } else {
-        // Read conversion result
-        USIC_I2C_StartWrite(ADS1115_SLAVE_ADDR, ADS1115_CONV_REG);
-        USIC_I2C_RepeatedStartRead(ADS1115_SLAVE_ADDR);
-
-        uint8_t msb = USIC_I2C_ReadByte(1, 0);
-        uint8_t lsb = USIC_I2C_ReadByte(0, 1); // NACK + STOP
-
-        sample = (int16_t)(((uint16_t)msb << 8) | (uint16_t)lsb);
-
-        phase = 0;
-        return sample;
+    if (sample_out == NULL) {
+        return false;
     }
+
+    // Prime the pipeline with the first trigger.
+    if (!conversion_primed) {
+        if (ADS1115_StartSingleShot()) {
+            conversion_primed = true;
+        }
+        return false;
+    }
+
+    // Poll the conversion status once per scheduler tick.
+    if (!ADS1115_ReadConfigMSB(&status_msb)) {
+        conversion_primed = false;
+        return false;
+    }
+
+    if ((status_msb & ADS1115_OS_READY_MASK) == 0U) {
+        return false;
+    }
+
+    if (!ADS1115_ReadConversionWord(&raw)) {
+        conversion_primed = false;
+        return false;
+    }
+
+    converted = (int16_t)(raw - (int16_t)DIGITAL_DC_OFFSET);
+    g_last_adc_sample = converted;
+    *sample_out = converted;
+
+    // Trigger the next conversion immediately after a successful read so the
+    // next sample can be ready by the next 250 Hz scheduler tick.
+    conversion_primed = ADS1115_StartSingleShot();
+    return true;
 }

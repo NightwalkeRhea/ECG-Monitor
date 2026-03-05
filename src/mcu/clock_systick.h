@@ -5,6 +5,9 @@
 // Initialize the SysTick timer for the required sampling rate (250 Hz)
 void SysTick_Init(void);
 
+extern volatile uint32_t g_systick_ticks;
+extern volatile uint32_t g_sample_tick;
+
 // User-defined handler called by the actual SysTick_Handler IRQ
 void Sampling_ISR_Handler(void);
 

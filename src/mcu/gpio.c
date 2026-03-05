@@ -2,18 +2,18 @@
 
 // Assuming the passive buzzer/LED is connected to P0.1
 #define ALARM_PIN_MASK (1U << 1) 
-#define ALARM_PIN_BIT_POS (1U)
+#define ALARM_PIN_IOCR_SHIFT (11U)
 
 void GPIO_Actuator_Init(void) {
     // Explanation: Configure P0.1 as a standard push-pull output.
     // Bits 7:3 of P0_IOCR0 control P0.1 pin function.
     
     // Clear P0.1 control bits first
-    P0_IOCR0 &= ~(0x1FUL << ALARM_PIN_BIT_POS); 
+    P0_IOCR0 &= ~(0x1FUL << ALARM_PIN_IOCR_SHIFT); 
     
     // Set P0.1 (PC1) to Push-Pull Alternate Function (e.g., ALT1: 10001b) 
     // or simply Push-Pull General Purpose Output (which is usually sufficient if no ALT function is needed)
-    P0_IOCR0 |= (0x10U << ALARM_PIN_BIT_POS); 
+    P0_IOCR0 |= (0x10U << ALARM_PIN_IOCR_SHIFT); 
     
     // Ensure it starts OFF
     Deactivate_Alarm(); 
