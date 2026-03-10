@@ -76,6 +76,8 @@ static uint16_t FPGA_BPM_Read(int16_t raw_sample, volatile int16_t *filtered_out
 void Sampling_ISR_Handler(void) {
     int16_t sample = 0;
 
+    GPIO_Debug_Scheduler_Tick();
+
     // 1. Read Analog Data (I2C Master to ADS1115 Slave)
     // The non-blocking state machine returns true only when a fresh conversion
     // is ready, so we can keep each scheduler step bounded in time.
@@ -86,7 +88,9 @@ void Sampling_ISR_Handler(void) {
 
     // 2. Send Raw Data to FPGA for real-time DSP (SPI Master to FPGA Slave)
     // The FPGA starts processing (Filtering, Squaring, MWI).
-    FPGA_Send_Data(g_raw_adc_sample);
+    if (FPGA_Send_Data(g_raw_adc_sample)) {
+        GPIO_Debug_SPI_Sent();
+    }
 
     // 3. Receive Processed Results (Simulated FPGA Output Read)
     // The FPGA provides the calculated filtered waveform and the final BPM result.
@@ -116,10 +120,12 @@ void Sampling_ISR_Handler(void) {
 
 int main(void) {
     // 1. System Initialization
-    // Calls USIC_Clock_Enable(), USIC_I2C_Init(), USIC_SPI_Init(), USIC_UART_Init(), 
+    // Calls USIC_Clock_Enable(), USIC_I2C_Init(), GPIO-based FPGA SPI init,
     // GPIO_Actuator_Init(), and SysTick_Init().
-    // This function sets up all hardware and configures the 250 Hz sampling timer.
     System_Init();
+    // Temporary ADS1115 boot probe hook, kept here for fallback bring-up only:
+    // I2C_Debug_BootProbe();
+    // while (true) { __WFI(); }
 
     // 2. Main Execution Loop
     while (true) {

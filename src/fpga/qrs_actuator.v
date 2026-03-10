@@ -6,7 +6,7 @@ module qrs_actuator (
 );
     // Simple comparison logic goes here.
     localparam BPM_LOW_THRESHOLD = 8'd50;
-    localparam BPM_HIGH_THRESHOLD = 8'd100;
+    localparam BPM_HIGH_THRESHOLD = 8'd120;
     
     always @(posedge clk_core) begin
         if (!rst_n) begin

@@ -6,13 +6,7 @@ module fir_filter #(
     parameter integer N_TAPS      = 31,
     parameter integer DATA_W      = 16,
     parameter integer COEFF_W     = 16,
-    parameter integer ACC_GUARD   = 6,
-    parameter signed [COEFF_W-1:0] COEFFS [0:N_TAPS-1] = '{
-        -16'sd144, -16'sd207, -16'sd321, -16'sd488, -16'sd679, -16'sd840, -16'sd898, -16'sd778, -16'sd427,
-        16'sd172, 16'sd985, 16'sd1926, 16'sd2872, 16'sd3683, 16'sd4231, 16'sd4424, 16'sd4231, 16'sd3683,
-        16'sd2872, 16'sd1926, 16'sd985, 16'sd172, -16'sd427, -16'sd778, -16'sd898, -16'sd840, -16'sd679,
-        -16'sd488, -16'sd321, -16'sd207, -16'sd144
-    }
+    parameter integer ACC_GUARD   = 6
 ) (
     input  wire clk,
     input  wire reset_n,
@@ -26,6 +20,47 @@ module fir_filter #(
     localparam integer ACC_W     = DATA_W + COEFF_W + ACC_GUARD;
     localparam integer Y_W       = DATA_W + COEFF_W + ACC_GUARD - 15;
     localparam integer TAP_IDX_W = (N_TAPS <= 2) ? 1 : $clog2(N_TAPS);
+
+    // Icarus Verilog does not accept default unpacked array parameters here,
+    // so the coefficient table is expressed as a synthesizable function.
+    function signed [COEFF_W-1:0] coeff_at;
+        input [TAP_IDX_W-1:0] idx;
+        begin
+            case (idx)
+                5'd0: coeff_at = -16'sd144;
+                5'd1: coeff_at = -16'sd207;
+                5'd2: coeff_at = -16'sd321;
+                5'd3: coeff_at = -16'sd488;
+                5'd4: coeff_at = -16'sd679;
+                5'd5: coeff_at = -16'sd840;
+                5'd6: coeff_at = -16'sd898;
+                5'd7: coeff_at = -16'sd778;
+                5'd8: coeff_at = -16'sd427;
+                5'd9: coeff_at = 16'sd172;
+                5'd10: coeff_at = 16'sd985;
+                5'd11: coeff_at = 16'sd1926;
+                5'd12: coeff_at = 16'sd2872;
+                5'd13: coeff_at = 16'sd3683;
+                5'd14: coeff_at = 16'sd4231;
+                5'd15: coeff_at = 16'sd4424;
+                5'd16: coeff_at = 16'sd4231;
+                5'd17: coeff_at = 16'sd3683;
+                5'd18: coeff_at = 16'sd2872;
+                5'd19: coeff_at = 16'sd1926;
+                5'd20: coeff_at = 16'sd985;
+                5'd21: coeff_at = 16'sd172;
+                5'd22: coeff_at = -16'sd427;
+                5'd23: coeff_at = -16'sd778;
+                5'd24: coeff_at = -16'sd898;
+                5'd25: coeff_at = -16'sd840;
+                5'd26: coeff_at = -16'sd679;
+                5'd27: coeff_at = -16'sd488;
+                5'd28: coeff_at = -16'sd321;
+                5'd29: coeff_at = -16'sd207;
+                default: coeff_at = -16'sd144;
+            endcase
+        end
+    endfunction
 
     reg signed [DATA_W-1:0] x [0:N_TAPS-1];
     reg signed [ACC_W-1:0]  acc_work;
@@ -59,7 +94,7 @@ module fir_filter #(
                 mac_busy <= 1'b1;
             end
         end else begin
-            mac_next = acc_work + (x[tap_idx] * COEFFS[tap_idx]);
+            mac_next = acc_work + (x[tap_idx] * coeff_at(tap_idx));
 
             if (tap_idx == N_TAPS-1) begin
                 acc_out   <= mac_next;

@@ -8,7 +8,7 @@ module spi_slave_rx_tb;
     reg spi_sclk = 0;
     reg spi_cs_n = 1;
     reg spi_mosi = 0;
-    reg rst_n = 0;
+    reg rst_n = 1;
 
     wire [15:0] ecg_data_out;
     wire data_valid;
@@ -42,10 +42,16 @@ module spi_slave_rx_tb;
     endtask
 
     initial begin
+        $dumpfile("spi_slave_rx_tb.vcd");
+        $dumpvars(0, spi_slave_rx_tb);
+
         $display("Starting spi_slave_rx TB");
-        rst_n = 0;
+        rst_n = 1'b1;
+        #1;
+        rst_n = 1'b0;
         #200;
-        rst_n = 1;
+        rst_n = 1'b1;
+        #100;
 
         spi_send_word(16'h1234);
         spi_send_word(16'hABCD);
@@ -55,10 +61,8 @@ module spi_slave_rx_tb;
         $finish;
     end
 
-    always @(posedge clk_sys) begin
-        if (data_valid) begin
-            $display("RX @ %0t : %h", $time, ecg_data_out);
-        end
+    always @(posedge data_valid) begin
+        $display("RX @ %0t : %h", $time, ecg_data_out);
     end
 
 endmodule

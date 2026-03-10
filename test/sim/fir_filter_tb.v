@@ -39,6 +39,9 @@ module fir_filter_tb;
     integer i;
 
     initial begin
+        $dumpfile("fir_filter_tb.vcd");
+        $dumpvars(0, fir_filter_tb);
+
         reset_n = 0;
         sample_en = 0;
         sample_in = 0;

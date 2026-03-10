@@ -30,6 +30,9 @@ module spi_byte_shifter_tb;
     );
 
     initial begin
+        $dumpfile("spi_byte_shifter_tb.vcd");
+        $dumpvars(0, spi_byte_shifter_tb);
+
         reset_n = 0;
         #50 reset_n = 1;
 

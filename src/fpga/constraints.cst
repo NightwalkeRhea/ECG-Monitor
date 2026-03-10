@@ -13,14 +13,29 @@ IO_PORT "CLK_27MHZ" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC "RST_N" 3;
 IO_PORT "RST_N" IO_TYPE=LVCMOS18 PULL_MODE=UP;
 
+// 1c. On-board RGB/debug LEDs (active low, common-anode, 1.8 V bank)
+IO_LOC "DBG_LED0_N" 10;
+IO_PORT "DBG_LED0_N" IO_TYPE=LVCMOS18;
+
+IO_LOC "DBG_LED1_N" 11;
+IO_PORT "DBG_LED1_N" IO_TYPE=LVCMOS18;
+
+IO_LOC "DBG_LED2_N" 13;
+IO_PORT "DBG_LED2_N" IO_TYPE=LVCMOS18;
+
+IO_LOC "DBG_LED3_N" 14;
+IO_PORT "DBG_LED3_N" IO_TYPE=LVCMOS18;
+
 // 2. MCU -> FPGA SPI slave interface
-IO_LOC "SPI_SCLK_IN" 19;
+// Use exposed right-side Bank 2 pins so the prototype can be wired without
+// relying on the unsoldered or blocked header positions.
+IO_LOC "SPI_SCLK_IN" 36;
 IO_PORT "SPI_SCLK_IN" IO_TYPE=LVCMOS33;
 
-IO_LOC "SPI_MOSI_IN" 20;
+IO_LOC "SPI_MOSI_IN" 37;
 IO_PORT "SPI_MOSI_IN" IO_TYPE=LVCMOS33;
 
-IO_LOC "SPI_CS_N_IN" 25;
+IO_LOC "SPI_CS_N_IN" 38;
 IO_PORT "SPI_CS_N_IN" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 // 3. FPGA -> external W25Q64FV SPI master interface

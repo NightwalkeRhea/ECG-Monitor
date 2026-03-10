@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 #include "mcu_definition.h"
 
 
@@ -15,7 +16,6 @@ void USIC_I2C_Init(void);
 void USIC_UART_Init(void);
 // Initialize USIC Channel 1 for SPI Master operation (FPGA interface)
 void USIC_SPI_Init(void);
-
 // --- Low-Level Protocol Functions (used internally by common_api.h) ---
 
 // I2C Functions (Master)
@@ -27,7 +27,7 @@ uint32_t USIC_I2C_GetErrorFlags(void);
 void USIC_I2C_ClearErrorFlags(void);
 
 // SPI Functions (Master)
-uint16_t USIC_SPI_Transfer(uint16_t data, uint8_t cs_select);
+bool USIC_SPI_Transfer(uint16_t data, uint8_t cs_select);
 
 // UART Functions (Transmit)
 void USIC_UART_Transmit(uint8_t data);

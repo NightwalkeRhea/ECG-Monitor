@@ -35,6 +35,9 @@ module w25q64_page_logger_tb;
     integer i;
 
     initial begin
+        $dumpfile("w25q64_page_logger_tb.vcd");
+        $dumpvars(0, w25q64_page_logger_tb);
+
         for (i = 0; i < 256; i = i + 1)
             buf_mem[i] = i;
 

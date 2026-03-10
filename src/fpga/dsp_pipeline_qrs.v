@@ -19,6 +19,12 @@ module dsp_pipeline_qrs #(
 );
 
     localparam integer BPM_NUM = 60 * FS_HZ;
+    localparam integer BPM_MAX_VALID = 220;
+    localparam integer BPM_MIN_VALID = 30;
+    localparam integer REFRACTORY_MS = 180;
+    localparam [15:0] RR_MIN_SAMPLES = (BPM_NUM + BPM_MAX_VALID - 1) / BPM_MAX_VALID;
+    localparam [15:0] RR_MAX_SAMPLES = BPM_NUM / BPM_MIN_VALID;
+    localparam [15:0] REFRACTORY_SAMPLES = ((FS_HZ * REFRACTORY_MS) + 999) / 1000;
 
     wire signed [37:0] fir_acc;
     wire signed [22:0] fir_y;
@@ -30,8 +36,12 @@ module dsp_pipeline_qrs #(
     reg  [15:0] bpm_div_rem;
     reg  [7:0]  bpm_div_q;
     reg         bpm_div_busy;
+    reg  [15:0] refractory_count;
 
     wire [15:0] rr_interval = rr_samples + 16'd1;
+    wire signed [15:0] filtered_sat = sat23_to16(fir_y);
+    wire [15:0] filtered_abs = abs16(filtered_sat);
+    wire rr_interval_valid = (rr_interval >= RR_MIN_SAMPLES) && (rr_interval <= RR_MAX_SAMPLES);
 
     function signed [15:0] sat23_to16;
         input signed [22:0] value;
@@ -81,6 +91,7 @@ module dsp_pipeline_qrs #(
             bpm_div_rem      <= 16'd0;
             bpm_div_q        <= 8'd0;
             bpm_div_busy     <= 1'b0;
+            refractory_count <= 16'd0;
         end else begin
             qrs_detected_out <= 1'b0;
             log_trigger_out  <= 1'b0;
@@ -97,25 +108,34 @@ module dsp_pipeline_qrs #(
             end
 
             if (fir_out_valid) begin
-                filtered_out   <= sat23_to16(fir_y);
-                log_word_out   <= sat23_to16(fir_y);
+                filtered_out   <= filtered_sat;
+                log_word_out   <= filtered_sat;
                 log_word_valid <= 1'b1;
 
                 if (rr_samples != 16'hFFFF) begin
                     rr_samples <= rr_interval;
                 end
+                if (refractory_count != 16'd0) begin
+                    refractory_count <= refractory_count - 16'd1;
+                end
 
-                if (!above && (abs16(sat23_to16(fir_y)) > QRS_THRESH)) begin
+                if (!above && (refractory_count == 16'd0) && (filtered_abs > QRS_THRESH)) begin
                     above            <= 1'b1;
                     qrs_detected_out <= 1'b1;
                     log_trigger_out  <= 1'b1;
                     rr_samples       <= 16'd0;
+                    refractory_count <= REFRACTORY_SAMPLES;
 
-                    bpm_div_den  <= rr_interval;
-                    bpm_div_rem  <= BPM_NUM[15:0];
-                    bpm_div_q    <= 8'd0;
-                    bpm_div_busy <= 1'b1;
-                end else if (above && (abs16(sat23_to16(fir_y)) < (QRS_THRESH >> 1))) begin
+                    if (rr_interval_valid) begin
+                        bpm_div_den  <= rr_interval;
+                        bpm_div_rem  <= BPM_NUM[15:0];
+                        bpm_div_q    <= 8'd0;
+                        bpm_div_busy <= 1'b1;
+                    end else begin
+                        bpm_div_busy    <= 1'b0;
+                        current_bpm_out <= 8'd0;
+                    end
+                end else if (above && (filtered_abs < (QRS_THRESH >> 1))) begin
                     above <= 1'b0;
                 end
             end

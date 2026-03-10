@@ -48,7 +48,7 @@ sim-spi-rx:
 sim-w25q64:
 	@echo "Running W25Q64 Page Logger simulation..."
 	@command -v $(SIMULATOR) >/dev/null 2>&1 || (echo "$(SIMULATOR) not found. Install Icarus Verilog or configure SIMULATOR." && exit 1)
-	$(SIMULATOR) $(SIMULATOR_FLAGS) -o sim_w25q64.vvp sim/w25q64_page_logger_tb.v ../src/fpga/flash_page.v
+	$(SIMULATOR) $(SIMULATOR_FLAGS) -o sim_w25q64.vvp sim/w25q64_page_logger_tb.v ../src/fpga/flash_page.v ../src/fpga/spi_shifter.v
 	vvp sim_w25q64.vvp
 
 # Clean simulation artifacts
@@ -75,6 +75,8 @@ help:
 	@echo ""
 	@echo "Setup:"
 	@echo "  Install Icarus Verilog: https://steveicarus.github.io/iverilog/"
+	@echo "  Install GTKWave to open the generated .vcd waveform files"
 	@echo ""
 	@echo "Example:"
 	@echo "  make SIMULATOR=xvlog sim-all"
+	@echo "  gtkwave spi_slave_rx_tb.vcd"

@@ -22,6 +22,7 @@
 // connected to the on-chip peripheral units.
 #define PORT0_BASE             0x40040000UL // GPIO Port 0 Base 
 #define PORT1_BASE             0x40040100UL // GPIO Port 1 Base, high current bi-directional pad
+#define PORT2_BASE             0x40040200UL
 #define USIC0_CH0_BASE         0x48000000UL // USIC Channel 0 (for I2C, UART), end address 480001FFH
 #define USIC0_CH1_BASE         0x48000200UL // USIC Channel 1 (for SPI), end address 480003FFH
 #define SYST_BASE              0xE000E000UL // Cortex-M0 SysTick Timer Base 
@@ -42,11 +43,19 @@
 #define P0_IOCR8               (*(volatile uint32_t*)(PORT0_BASE + 0x18UL)) // P0.8 to P0.11
 #define P0_IOCR12              (*(volatile uint32_t*)(PORT0_BASE + 0x1CUL)) // P0.12 to P0.15
 #define P1_IOCR0               (*(volatile uint32_t*)(PORT1_BASE + 0x10UL)) // P1.0 to P1.3
+#define P2_IOCR8               (*(volatile uint32_t*)(PORT2_BASE + 0x18UL)) // P2.8 to P2.11
 
 
 // General Output Registers (for setting/clearing pins)
 #define P0_OUT                 (*(volatile uint32_t*)(PORT0_BASE + 0x00UL))
 #define P0_OMR                 (*(volatile uint32_t*)(PORT0_BASE + 0x04UL)) // Output Modification Register
+#define P1_OUT                 (*(volatile uint32_t*)(PORT1_BASE + 0x00UL))
+#define P1_OMR                 (*(volatile uint32_t*)(PORT1_BASE + 0x04UL))
+#define P2_OUT                 (*(volatile uint32_t*)(PORT2_BASE + 0x00UL))
+#define P2_IN                  (*(volatile uint32_t*)(PORT2_BASE + 0x24UL))
+#define P2_OMR                 (*(volatile uint32_t*)(PORT2_BASE + 0x04UL))
+#define P2_PDISC               (*(volatile uint32_t*)(PORT2_BASE + 0x60UL))
+#define P2_HWSEL               (*(volatile uint32_t*)(PORT2_BASE + 0x74UL))
 
 // SysTick Registers (Cortex-M0 Private Peripheral Bus, PPB)
 // SysTick control and status register, bit 2 will determine the systick timer clock source. if 0, External clock, 1 Processor clock

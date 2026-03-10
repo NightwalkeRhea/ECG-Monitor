@@ -1,6 +1,6 @@
 module w25q64_page_logger #(
     parameter integer CLK_DIV    = 4,
-    parameter [23:0]  START_ADDR = 24'h0010_0000
+    parameter [23:0]  START_ADDR = 24'h100000
 ) (
     input  wire clk,
     input  wire reset_n,
