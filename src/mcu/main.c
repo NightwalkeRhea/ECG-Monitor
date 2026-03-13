@@ -3,131 +3,59 @@
 #include "common.h"
 #include "gpio.h"
 #include "clock_systick.h"
-#include "mcu_definition.h"
 #include <stdbool.h>
 
 #ifndef __WFI
-#define __WFI() __asm volatile ("wfi")
+    #define __WFI() __asm volatile ("wfi")
 #endif
 
 #ifndef __disable_irq
-#define __disable_irq() __asm volatile ("cpsid i" : : : "memory")
+    #define __disable_irq() __asm volatile ("cpsid i" : : : "memory")
 #endif
 
+/* (changes CPSR i with a memory clobber) which enables 
+(unmasks) the processor’s interrupt flag. */
 #ifndef __enable_irq
-#define __enable_irq() __asm volatile ("cpsie i" : : : "memory")
+    #define __enable_irq() __asm volatile ("cpsie i" : : : "memory")
 #endif
 
-#ifndef ENABLE_UART_TELEMETRY
-#define ENABLE_UART_TELEMETRY (0)
-#endif
-
-// --- Global System State Variables ---
-// These variables store the latest data, accessible by both the ISR and the main loop.
-
-// Volatile keyword ensures the compiler doesn't optimize away reads, 
+//the compiler shouldn't optimize away reads,
 // as the variable is modified externally by the ISR.
 volatile int16_t g_raw_adc_sample = 0; 
-volatile int16_t g_filtered_data = 0;   // Placeholder for data received back from FPGA/DSP
-volatile uint16_t g_current_bpm = 72;    // Current measured heart rate (BPM)
-const uint16_t BPM_THRESHOLD = 120;    // Alarm threshold for tachycardia (e.g., 120 BPM)
 
 
-// --- Placeholder Function for FPGA Output ---
-// In a real system, this function would handle reading the final processed data 
-// (e.g., filtered sample and BPM result) from the FPGA via SPI MISO or dedicated registers.
+// Periodic sampling, triggered by the 250 Hz SysTick flag
 
-/**
- * @brief Reads processed data and BPM from the FPGA.
- * @return Simulated BPM value.
- */
-static uint16_t FPGA_BPM_Read(int16_t raw_sample, volatile int16_t *filtered_out) {
-    // --- SIMULATION/PLACEHOLDER LOGIC ---
-    // In a final embedded system:
-    // 1. MCU might poll an FPGA register via SPI read command.
-    // 2. MCU might wait for a dedicated IRQ pin from the FPGA signaling a new BPM result.
-    
-    // For this demonstration, we simulate the FPGA processing:
-    // Simple digital filter simulation (crude low-pass by averaging)
-    static int16_t previous_filtered = 0;
-    *filtered_out = (raw_sample + previous_filtered) / 2;
-    previous_filtered = *filtered_out;
-
-    // Simulated detection logic: trigger a high BPM momentarily if the raw sample exceeds a peak.
-    if (raw_sample > 1500) { 
-        return 130; // Simulated abnormal heart rate (Tachycardia)
-    } else {
-        return 75; // Simulated normal heart rate
-    }
-}
-
-
-// ----------------------------------------------------------------------
-// Periodic sampling work, triggered by the 250 Hz SysTick flag
-// ----------------------------------------------------------------------
-
-/**
- * @brief Main sampling and processing handler, called from the main loop
- *        whenever the SysTick flag indicates a new sample period.
- * 
- * This function orchestrates the real-time data flow: 
- * ADC Read -> SPI Send -> Actuation Check -> UART Transmit.
- */
-void Sampling_ISR_Handler(void) {
+/*Main sampling and processing handler, called from the main loop whenever the SysTick flag indicates a new sample period.
+  This function organizes the real-time data flow of ADC Read -> SPI Send.*/
+void Sampling_ISR_Handler(void){
     int16_t sample = 0;
 
-    GPIO_Debug_Scheduler_Tick();
+    GPIO_Debug_Scheduler_Tick(); //used only in sw debugging
 
-    // 1. Read Analog Data (I2C Master to ADS1115 Slave)
-    // The non-blocking state machine returns true only when a fresh conversion
+    //Read Analog Data (I2C Master to ADS1115 Slave), returns true only when a fresh conversion
     // is ready, so we can keep each scheduler step bounded in time.
     if (!Sampling_Task(&sample)) {
         return;
     }
     g_raw_adc_sample = sample;
 
-    // 2. Send Raw Data to FPGA for real-time DSP (SPI Master to FPGA Slave)
-    // The FPGA starts processing (Filtering, Squaring, MWI).
+    // Send baseline-corrected data to the FPGA
     if (FPGA_Send_Data(g_raw_adc_sample)) {
         GPIO_Debug_SPI_Sent();
     }
-
-    // 3. Receive Processed Results (Simulated FPGA Output Read)
-    // The FPGA provides the calculated filtered waveform and the final BPM result.
-    g_current_bpm = FPGA_BPM_Read(g_raw_adc_sample, &g_filtered_data); 
-
-    // 4. Actuation Logic (Check for Abnormal Heart Rate)
-    if (g_current_bpm > BPM_THRESHOLD) {
-        // Heart rate is too high: Activate the passive buzzer/LED.
-        Activate_Alarm();
-    } else {
-        // Heart rate is normal: Ensure the alarm is off.
-        Deactivate_Alarm();
-    }
-    
-    // 5. Optional telemetry path.
-    // Keep this disabled by default until USIC CH0 UART mode switching is
-    // fully validated in hardware.
-    #if ENABLE_UART_TELEMETRY
-    PC_Transmit_Filtered_Data(g_filtered_data, g_current_bpm);
-    #endif
 }
 
 
-// ----------------------------------------------------------------------
-// Main Application Entry Point
-// ----------------------------------------------------------------------
-
 int main(void) {
-    // 1. System Initialization
-    // Calls USIC_Clock_Enable(), USIC_I2C_Init(), GPIO-based FPGA SPI init,
-    // GPIO_Actuator_Init(), and SysTick_Init().
+    // System Initialization
     System_Init();
-    // Temporary ADS1115 boot probe hook, kept here for fallback bring-up only:
+    // Temporary ADS1115 boot probe hook, kept here for fallback
     // I2C_Debug_BootProbe();
-    // while (true) { __WFI(); }
+    // while (true) {
+    // __WFI(); 
+    // }
 
-    // 2. Main Execution Loop
     while (true) {
         uint32_t pending_ticks = 0U;
 
@@ -140,15 +68,13 @@ int main(void) {
             Sampling_ISR_Handler();
         }
 
-        // Avoid sleeping if a new tick arrived after the snapshot.
-        if (g_sample_tick == 0U) {
-            // Use the WFI (Wait For Interrupt) instruction to put the Cortex-M0 core
-            // into a low-power Sleep mode. The core will immediately wake up when the
-            // SysTick ISR (at 250 Hz) or any other enabled interrupt occurs.
+        // Avoid sleeping if a new tick arrived
+        if (g_sample_tick == 0U){
+            //low-power Sleep mode. The core will immediately wake up when the
+            //SysTick ISR (at 250 Hz) or any other enabled interrupt occurs.
             __WFI();
         }
-        
-        // After the ISR runs, execution returns here to wait for the next interrupt.
+        // After the ISR, execution returns here and waits for the next interrupt
     }
 
     // Should never be reached

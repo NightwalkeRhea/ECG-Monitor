@@ -1,19 +1,12 @@
 #pragma once
 
 #include <stdint.h>
-#include "mcu_definition.h"
 
-// Initialize the GPIO pin for the buzzer/LED (e.g., P0.1) as an output
-void GPIO_Actuator_Init(void);
+// Configure the two XMC2Go board LEDs used for firmware/debug visibility.
 void GPIO_Debug_Init(void);
 
-// Activate the buzzer/LED (e.g., if BPM is too high/low)
-void Activate_Alarm(void);
-
-// Deactivate the buzzer/LED
-void Deactivate_Alarm(void);
-
-// Visible firmware activity on XMC2Go user LEDs.
+// Expose scheduler activity on a board LED.
 void GPIO_Debug_Scheduler_Tick(void);
+
+// Expose successful sample pushes toward the FPGA on a board LED.
 void GPIO_Debug_SPI_Sent(void);
-void GPIO_Debug_ShowI2CBusLevels(uint8_t sda_high, uint8_t scl_high);

@@ -1,26 +1,23 @@
 import numpy as np
 from scipy.signal import lfilter
-from fir_coef import coefs, Fs  # uses your bandpass taps and sampling rate
+from fir_coef import coefs, Fs  # uses the bandpass taps and sampling rate
 
 # derivative kernel from Pan–Tompkins, scaled to Fs (original assumes 200 Hz)
 deriv_kernel = (Fs / 8.0) * np.array([1, 2, 0, -2, -1])
 
 def pan_tompkins_ref(ecg, fs=Fs, bandpass_taps=coefs, mwi_ms=150):
-    # 1) Bandpass (your FIR)
+    # Bandpass (FIR)
     band = lfilter(bandpass_taps, 1.0, ecg)
-
-    # 2) Derivative
+    # Derivative
     diff = lfilter(deriv_kernel, 1.0, band)
-
-    # 3) Squaring
+    # Squaring
     squared = diff ** 2
-
-    # 4) Moving-window integration (typical 150 ms)
+    # Moving-window integration (typical 150 ms)
     mwi_len = max(1, int(round(mwi_ms * fs / 1000.0)))
     mwi_kernel = np.ones(mwi_len) / mwi_len
     mwi = np.convolve(squared, mwi_kernel, mode="same")
 
-    # 5) Simple adaptive threshold & peak picking
+    # Simple adaptive threshold & peak picking
     thresh = 0.5 * (np.mean(mwi) + np.max(mwi))
     refractory = int(0.200 * fs)  # 200 ms lockout
     peaks = []
@@ -46,8 +43,6 @@ def pan_tompkins_ref(ecg, fs=Fs, bandpass_taps=coefs, mwi_ms=150):
 
 if __name__ == "__main__":
     # Synthetic ECG-like test (1 Hz heartbeat + harmonics + noise)
-
-
     duration_s = 10
     t = np.arange(0, duration_s, 1.0 / Fs)
     ecg = 0.9 * np.sin(2 * np.pi * 1.0 * t) \
@@ -58,4 +53,3 @@ if __name__ == "__main__":
     res = pan_tompkins_ref(ecg)
     print("Detected R-peak sample indices:", res["r_peaks_idx"])
     print("Threshold used:", res["threshold"])
-    # You can also save res["band"], res["diff"], res["squared"], res["mwi"] for FPGA cross-checks.

@@ -4,25 +4,23 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// --- Register Pointers for USIC0 Channel 0 (I2C/UART) ---
+// --- Register Pointers for USIC0 Channel 0 ---
 // USIC0_CH0_BASE = 0x48000000UL -> check mcu_definition.h for the register mapping. 
 #define CH0_KSCFG          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x0C)) // Kernel State Configuration
 #define CH0_CCR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x40)) // Channel Control Register
-#define CH0_CCFG           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x04))
 #define CH0_FDR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x10)) // Fractional Divider Register
 #define CH0_BRG            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x14)) // Baud Rate Generator
 #define CH0_SCTR           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x34)) // Shift Control Register
-#define CH0_PCR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x3C)) // Protocol Control Register (IIC/ASC specific)
+#define CH0_PCR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x3C)) // Protocol Control Register
 #define CH0_PSR            (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x48)) // Protocol Status Register
 #define CH0_PSCR           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x4C)) // Protocol Status Clear Register
 #define CH0_TBUF           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x80)) // Transmit Buffer Input Location
 #define CH0_RBUF           (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x54)) // Receive Buffer Register
-#define CH0_DX0CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x1C)) // Input Control Register 0 (SDA/RXD)
-#define CH0_DX1CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x20)) // Input Control Register 1 (SCL/TXD)
-#define CH0_DX2CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x24)) // Input Control Register 2 (ASC collision/idle detection path)
+#define CH0_DX0CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x1C)) // Input Control Register 0
+#define CH0_DX1CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x20)) // Input Control Register 1
+#define CH0_DX2CR          (*(volatile uint32_t*)(USIC0_CH0_BASE + 0x24)) // Input Control Register 2
 
 #define CCFG_SSC (1U<<0)
-#define CCFG_ASC (1U<<1)
 #define CCFG_IIC (1U<<2)
 #define CCFG_RB  (1U<<6)
 #define CCFG_TB  (1U<<7)
@@ -47,7 +45,7 @@
 
 // Temporary isolation remap:
 // use USIC0_CH1 on P2.10/P2.11 for the ADS1115 probe because those pins are
-// exposed on the XMC2Go header, while P2.0 is not.
+// exposed on the XMC2Go header
 // Restore the original design by setting this back to 0.
 #define I2C_ISOLATION_USE_CH1_P2_10_P2_11 (1U)
 
@@ -71,13 +69,12 @@
 // Common USIC bit field helpers
 #define USIC_CCR_MODE_DISABLED (0x0U)
 #define USIC_CCR_MODE_SSC      (0x1U)
-#define USIC_CCR_MODE_ASC      (0x2U)
 #define USIC_CCR_MODE_IIC      (0x4U)
 
 #define USIC_SCTR_SDIR_MSB     (1U << 0)
 #define USIC_SCTR_PDL_MASK     (1U << 1)
 #define USIC_SCTR_DOCFG_OD     (0U << 6)
-#define USIC_SCTR_TRM_STD      (1U << 8) // ASC/SSC recommendation: TRM = 01b
+#define USIC_SCTR_TRM_STD      (1U << 8) // SSC standard transfer mode: TRM = 01b
 #define USIC_SCTR_TRM_IIC      (3U << 8) // IIC recommendation: TRM = 11b
 #define USIC_SCTR_FLE(v)       ((uint32_t)(v) << 16)
 #define USIC_SCTR_WLE(v)       ((uint32_t)(v) << 24)
@@ -100,7 +97,7 @@
 #define USIC_DXCR_INSW_DIRECT  (0U << 4)
 #define USIC_DXCR_INSW_INPUT   (1U << 4)
 
-#define USIC_KSCFG_MODEN       (1U << 0)
+#define USIC_KSCFG_MODEN       (1U << 0) 
 #define USIC_KSCFG_BPMODEN     (1U << 1)
 
 #define USIC_TCSR_TDSSM        (1U << 8)
@@ -118,7 +115,6 @@
 #define TDF_MASTER_STOP        (0x6U) // 110b: Send STOP Condition
 
 // PSR Flag Masks
-#define PSR_TBIF_MASK          (1U << 13) // Transmit Buffer Indication Flag
 #define PSR_RIF_MASK           (1U << 14) // Receive Indication Flag
 #define PSR_AIF_MASK           (1U << 15) // Alternative Receive Indication Flag
 #define PSR_PCR_MASK           (1U << 4)  // IIC: Stop Condition Received Flag
@@ -167,37 +163,31 @@
 #endif
 
 static volatile uint32_t g_usic_i2c_errors = 0U;
-// -----------------------------------------------------------------------------
 // Helper Functions
-// -----------------------------------------------------------------------------
 
-/**
- * @brief Waits until the specified flag in the Protocol Status Register (PSR) of USIC0_CH0 is set.
- */
-static bool USIC_WaitForFlag_CH0(uint32_t flag_mask) {
+/*Waits until the specified flag in the Protocol Status Register (PSR) of USIC0_CH0 is set.*/
+static bool USIC_WaitForFlag_CH0(uint32_t flag_mask){
     uint32_t timeout = USIC_WAIT_TIMEOUT;
 
-    while (timeout-- != 0U) {
+    while (timeout-- != 0U){
         uint32_t psr = I2C_PSR;
 
-        if ((psr & PSR_IIC_FATAL_MASK) != 0U) {
+        if ((psr & PSR_IIC_FATAL_MASK) != 0U){
             g_usic_i2c_errors |= (psr & PSR_IIC_FATAL_MASK);
             I2C_PSCR = (psr & PSR_IIC_FATAL_MASK);
             return false;
         }
 
-        if ((psr & flag_mask) != 0U) {
+        if ((psr & flag_mask) != 0U){
             return true;
         }
     }
-
     g_usic_i2c_errors |= USIC_I2C_ERR_TIMEOUT;
     return false;
 }
 
-static bool USIC_WaitForAckOrNack_CH0(void) {
+static bool USIC_WaitForAckOrNack_CH0(void){
     uint32_t timeout = USIC_WAIT_TIMEOUT;
-
     while (timeout-- != 0U) {
         uint32_t psr = I2C_PSR;
 
@@ -206,26 +196,21 @@ static bool USIC_WaitForAckOrNack_CH0(void) {
             I2C_PSCR = (psr & PSR_IIC_FATAL_MASK);
             return false;
         }
-
         if ((psr & PSR_IIC_ACK_MASK) != 0U) {
             I2C_PSCR = PSR_IIC_ACK_MASK;
             return true;
         }
-
         if ((psr & PSR_IIC_NACK_MASK) != 0U) {
             g_usic_i2c_errors |= PSR_IIC_NACK_MASK;
             I2C_PSCR = PSR_IIC_NACK_MASK;
             return false;
         }
     }
-
     g_usic_i2c_errors |= USIC_I2C_ERR_TIMEOUT;
     return false;
 }
 
-/**
- * @brief Waits until the specified flag in the Protocol Status Register (PSR) of USIC0_CH1 is set.
- */
+/* Waits until the specified flag in the Protocol Status Register (PSR) of USIC0_CH1 is set.*/
 static bool USIC_WaitForFlag_CH1(uint32_t flag_mask) {
     uint32_t timeout = USIC_WAIT_TIMEOUT;
 
@@ -234,7 +219,6 @@ static bool USIC_WaitForFlag_CH1(uint32_t flag_mask) {
             return true;
         }
     }
-
     return false;
 }
 
@@ -249,7 +233,6 @@ static bool USIC_WaitForAnyFlag_CH0(uint32_t flag_mask, uint32_t *observed_flags
             I2C_PSCR = (psr & PSR_IIC_FATAL_MASK);
             return false;
         }
-
         if ((psr & flag_mask) != 0U) {
             if (observed_flags != NULL) {
                 *observed_flags = (psr & flag_mask);
@@ -257,32 +240,26 @@ static bool USIC_WaitForAnyFlag_CH0(uint32_t flag_mask, uint32_t *observed_flags
             return true;
         }
     }
-
     g_usic_i2c_errors |= USIC_I2C_ERR_TIMEOUT;
     return false;
 }
 
-/**
- * @brief Clears the specified flag in the Protocol Status Register (PSR) of USIC0_CH0.
- */
-static void USIC_ClearFlag_CH0(uint32_t flag_mask) {
+/*Clears the specified flag in the Protocol Status Register (PSR) of USIC0_CH0.*/
+static void USIC_ClearFlag_CH0(uint32_t flag_mask){
     I2C_PSCR = flag_mask;
 }
 
-/**
- * @brief Clears the specified flag in the Protocol Status Register (PSR) of USIC0_CH1.
- */
+/*Clears the specified flag in the Protocol Status Register (PSR) of USIC0_CH1.*/
 static void USIC_ClearFlag_CH1(uint32_t flag_mask) {
     CH1_PSCR = flag_mask;
 }
 
-// -----------------------------------------------------------------------------
+
 // USIC Core Functions
-// -----------------------------------------------------------------------------
 
 void USIC_Clock_Enable(void) {
     // Enable USIC0 module clock (bit 3 in SCU_CGATCLR0)
-    // Use the same bit-protection sequence used by startup code so this works
+    // We use the same bit-protection sequence used by startup code so this works
     // regardless of current SCU protection state.
     uint32_t timeout = USIC_WAIT_TIMEOUT;
 
@@ -294,14 +271,17 @@ void USIC_Clock_Enable(void) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// I2C Implementation (USIC0_CH0)
-// -----------------------------------------------------------------------------
 
-void USIC_I2C_Init(void) {
-    // 1. Enable Channel first, mirroring the XMCLib/DAVE sequence. The USIC
-    // register programming for I2C is more reliable once MODEN/BPMODEN are set.
-    I2C_KSCFG = (USIC_KSCFG_MODEN | USIC_KSCFG_BPMODEN);
+
+// I2C Implementation (USIC0_CH0)
+
+void USIC_I2C_Init(void){
+    /* at 100 kHz
+     * Configuration: Single-ended AIN0/GND with +-4.096V PGA (conservative range, safe against clipping).
+     * ADS1115 Address: 0x48 (ADDR pin tied low, didn't I? TODO: check the breadboard).
+     * Single-shot mode: MCU initiates each conversion via I2C command.
+     */
+    I2C_KSCFG = (USIC_KSCFG_MODEN | USIC_KSCFG_BPMODEN);    
     while ((I2C_KSCFG & USIC_KSCFG_MODEN) == 0U) {
     }
 
@@ -310,8 +290,7 @@ void USIC_I2C_Init(void) {
     I2C_PSCR = 0xFFFFFFFFU;
     g_usic_i2c_errors = 0U;
 
-    // 2. Configure Pins
-    // Isolation remap:
+
     // P2.10 = SDA  -> USIC0_CH1 DOUT0 / DX0F
     // P2.11 = SCL  -> USIC0_CH1 SCLKOUT / DX1E
     // Restore the original design by setting I2C_ISOLATION_USE_CH1_P2_10_P2_11 back to 0.
@@ -327,40 +306,35 @@ void USIC_I2C_Init(void) {
     I2C_DX2CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A; // Not used in IIC, keep direct path.
 
     // Data format per the vendor I2C init: TRM=11b, 8-bit words, unlimited
-    // frame length, MSB first, passive data level high.
+    // frame length, MSB first, passive data level high
     I2C_SCTR = USIC_SCTR_SDIR_MSB |
                USIC_SCTR_TRM_IIC |
                USIC_SCTR_FLE(0x3FU) |
                USIC_SCTR_WLE(7U) |
                USIC_SCTR_PDL_MASK;
 
-    // 3. Baud Rate Configuration (Targeting 100 kHz I2C Standard Mode)
+    //Baud Rate Configuration (100kHz I2C Standard Mode)
     I2C_FDR = USIC_FDR_DM_DIV | USIC_FDR_STEP_MAX;
-    I2C_BRG = USIC_BRG_CLKSEL_DX1T |
-              USIC_BRG_DCTQ(9U) |
-              USIC_BRG_PDIV(63U) |
-              USIC_BRG_SCLKCFG(0U);
+    I2C_BRG = USIC_BRG_CLKSEL_DX1T | USIC_BRG_DCTQ(9U) | USIC_BRG_PDIV(63U) | USIC_BRG_SCLKCFG(0U);
 
-    // Enable transfer data valid handling as done by XMCLib.
+    // Enable transfer data valid handling
     I2C_TCSR = USIC_TCSR_TDSSM | USIC_TCSR_TDEN(1U);
     
-    // 4. IIC Protocol Control
+    // IIC Protocol Control
     // STIM = 0 (10 Time Quanta per symbol for 100 kHz Standard Mode) [14-130]
     // HDEL = 3 (Hardware Delay for SDA Hold Time ~300ns) [14-131, 14-118]
     I2C_PCR = (0U << 17) | // PCR.STIM = 0 (100 kBaud Standard Mode)
-              (3U << 26); // PCR.HDEL = 3 (Adjust delay for hold time)
+              (3U << 26); // PCR.HDEL = 3 Adjusted delay for hold time
 
-    // 5. Protocol Setup (IIC Mode 4H)
+    //Protocol Setup (IIC Mode 4H)
     I2C_CCR = USIC_CCR_MODE_IIC;
 }
 
-/**
- * @brief Sends the START condition, Slave Address (with Write bit), and Register Address.
- * @param slave_addr 7-bit I2C address of the target device.
- * @param reg_addr Internal register address to target.
+/*Sends the START condition, Slave Address (with Write bit), and Register Address.
+ Takes as inputs slave_addr 7-bit I2C address of the target device, and reg_addr Internal register address to target.
  */
-void USIC_I2C_StartWrite(uint8_t slave_addr, uint8_t reg_addr) {
-    // Explanation: Prepares the USIC TBUF to send the I2C START condition, 
+void USIC_I2C_StartWrite(uint8_t slave_addr, uint8_t reg_addr){
+    // Prepares the USIC TBUF to send the I2C START condition, 
     // the target slave address (left-shifted, with R/W bit low), and the 
     // internal register pointer address byte (reg_addr).
     uint8_t addr_w = (uint8_t)((slave_addr << 1) | 0U);
@@ -374,17 +348,13 @@ void USIC_I2C_StartWrite(uint8_t slave_addr, uint8_t reg_addr) {
     // Send pointer/register address byte
     I2C_PSCR = PSR_IIC_RESPONSE_MASK;
     I2C_TBUF = ((uint32_t)TDF_MASTER_TX << 8) | reg_addr;
-    if (!USIC_WaitForAckOrNack_CH0()) {
+    if (!USIC_WaitForAckOrNack_CH0()){
         return;
     }
 }
 
-/**
- * @brief Sends the repeated START condition
- * @param slave_addr 7-bit I2C address of the target device 
- */
-void USIC_I2C_RepeatedStartRead(uint8_t slave_addr)
-{
+/*Sends the repeated START condition, takes as input, slave_addr 7-bit I2C address of the target device */
+void USIC_I2C_RepeatedStartRead(uint8_t slave_addr){
     uint8_t addr_r = (uint8_t)((slave_addr << 1) | 1U);
 
     I2C_PSCR = PSR_IIC_RESPONSE_MASK;
@@ -394,21 +364,19 @@ void USIC_I2C_RepeatedStartRead(uint8_t slave_addr)
     }
 }
 
-/**
- * @brief Sends a data byte followed by an optional STOP condition.
- * @param data Data byte to send (MSB first due to SCTR configuration).
- * @param stop_condition True if this is the last byte and a STOP condition should be sent.
+/*Sends a data byte followed by an optional STOP condition.
+Takse as input the data byte to send (MSB first due to SCTR configuration). stop_condition True 
+if this is the last byte and a STOP condition should be sent.
  */
-void USIC_I2C_SendByte(uint8_t data, uint8_t stop_condition) {
-    // Explanation: Sends a single data byte (e.g., config MSB or LSB). 
-    // If stop_condition is true, the transaction is terminated with TDF_NACK_STOP code.
+void USIC_I2C_SendByte(uint8_t data, uint8_t stop_condition){
+    // Sends a single data byte (e.g., config MSB or LSB). 
+    // If stop_condition is true, transaction terminated with TDF_NACK_STOP
     
     I2C_PSCR = PSR_IIC_RESPONSE_MASK;
     I2C_TBUF = ((uint32_t)TDF_MASTER_TX << 8) | data;
     if (!USIC_WaitForAckOrNack_CH0()) {
         return;
     }
-
     if (stop_condition) {
         I2C_TBUF = ((uint32_t)TDF_MASTER_STOP << 8);
         if (!USIC_WaitForFlag_CH0(PSR_PCR_MASK)) {
@@ -418,17 +386,15 @@ void USIC_I2C_SendByte(uint8_t data, uint8_t stop_condition) {
     }
 }
 
-/**
- * @brief Reads a single data byte (Master Receive).
- * @param ack_condition True to send ACK (expecting more data), False to send NACK (last byte).
- * @param stop_condition True to terminate transaction with STOP after NACK.
- * @return The received data byte (bits 7:0 of RBUF).
- */
+/* Reads a single data byte (Master Receive).
+   ack_condition True to send ACK (expecting more data), False to send NACK (last byte).
+   stop_condition True to terminate transaction with STOP after NACK.
+   The received data byte (bits 7:0 of RBUF).*/
 uint8_t USIC_I2C_ReadByte(uint8_t ack_condition, uint8_t stop_condition) {
-    // Explanation: This function is called after the Repeated START is sent (in comm_api). 
+    //This function is called after the Repeated START is sent. 
     // It triggers the next byte read and controls the ACK/NACK/STOP handshake.
 
-    // 1. Send dummy word to trigger the read operation and set the ACK/NACK condition.
+    // Send dummy word to trigger the read operation and set the ACK/NACK condition.
     uint32_t tdf = ack_condition ? TDF_MASTER_RX_ACK : TDF_MASTER_RX_NACK;
     // 010b (ACK) for intermediate bytes and 011b (NACK) for the last byte, then STOP.
     
@@ -470,21 +436,23 @@ void USIC_I2C_ClearErrorFlags(void) {
     I2C_PSCR = (PSR_IIC_FATAL_MASK | PSR_IIC_NACK_MASK);
 }
 
-// -----------------------------------------------------------------------------
 // SPI Implementation (USIC0_CH1)
-// -----------------------------------------------------------------------------
 
 void USIC_SPI_Init(void) {
-    // Configure USIC0_CH1 as a simple SPI master for 16-bit writes to the FPGA.
-    // The current implementation drives chip-select manually on GPIO pins so the
-    // basic data path does not depend on SSC-specific SELO automation.
+    /* The active sample link in the current hardware build is the GPIO-based
+     * SPI path in common.c: P0.8 -> FPGA SPI_SCLK_IN (FPGA pin 36), MCU P0.7 -> FPGA SPI_MOSI_IN (FPGA pin 37)
+     * MCU P0.0 -> FPGA SPI_CS_N_IN (FPGA pin 38)
+     *
+     * This CH1 setup is kept only as a reference path and is not the primary
+     * transport used by the working prototype.
+     */
 
     // 1. Disable channel and clear status.
     CH1_KSCFG &= ~(USIC_KSCFG_MODEN | USIC_KSCFG_BPMODEN);
     CH1_CCR = USIC_CCR_MODE_DISABLED;
     CH1_PSCR = 0xFFFFFFFFU;
 
-    // 2. Configure output pins.
+    // 2) Configure output pins
     // P0.6  -> CH1 DX0C (MISO input)
     // P0.7  -> CH1 DOUT0 (MOSI, ALT7)
     // P0.8  -> CH1 SCLKOUT (ALT7)
@@ -536,13 +504,11 @@ void USIC_SPI_Init(void) {
 }
 
 bool USIC_SPI_Transfer(uint16_t data, uint8_t cs_select) {
-    // Explanation: Performs a single 16-bit simultaneous transmission and reception 
+    // Performs a single 16-bit simultaneous transmission and reception 
     // (full-duplex) using USIC0_CH1 Master, controlling the correct Chip Select line.
     uint32_t cs_mask = (cs_select == 0U) ? SPI_CS_FPGA_MASK : SPI_CS_FLASH_MASK;
 
-    // 1. Assert the selected chip-select line.
-    P0_OMR = (cs_mask << 16);
-
+    P0_OMR = (cs_mask << 16);   // 1. Assert the selected chip-select line.
     // 2. Clear any stale shift-complete indication, then start the transfer.
     USIC_ClearFlag_CH1(PSR_TSIF_MASK);
     CH1_TBUF = data; 
@@ -554,110 +520,9 @@ bool USIC_SPI_Transfer(uint16_t data, uint8_t cs_select) {
     }
     USIC_ClearFlag_CH1(PSR_TSIF_MASK);
 
-    // 4. Deassert the selected chip-select line.
-    P0_OMR = cs_mask;
-
+    P0_OMR = cs_mask;   // 4. Deassert the selected chip-select line.
     // 5. Read the receive register to clear the receive side path even though
     // the current FPGA path only uses MOSI.
     (void)CH1_RBUF;
     return true;
-}
-
-// -----------------------------------------------------------------------------
-// UART Implementation (USIC0_CH0)
-// -----------------------------------------------------------------------------
-
-void USIC_UART_Transmit(uint8_t data) {
-    // Explanation: Transmits a single byte via the UART (ASC) protocol on USIC0_CH0.
-    // This assumes USIC_UART_Init has been called.
-
-    // 1. Wait for Transmit Buffer Indication Flag (TBIF) - ensures TBUF is ready.
-    uint32_t timeout = USIC_WAIT_TIMEOUT;
-    while ((timeout-- != 0U) && ((CH0_PSR & PSR_TBIF_MASK) == 0U)) { }
-    if ((CH0_PSR & PSR_TBIF_MASK) == 0U) {
-        return;
-    }
-    USIC_ClearFlag_CH0(PSR_TBIF_MASK);
-    
-    // 2. Write data byte to TBUF. This triggers the transmission.
-    // The data transfer is 8 bits (WLE=7) as configured in USIC_UART_Init.
-    CH0_TBUF = data; 
-}
-
-// USIC0 mode switching implementation
-/**
- * @brief Configures USIC0_CH0 pins for I2C and sets protocol to IIC Mode (4H).
- * 
- * This sequence is called during System_Init() and when switching back from UART mode.
- */
-void USIC_SetMode_I2C_CH0(void) {
-    // 1. Disable Channel (Required before setting/changing mode)
-    CH0_KSCFG &= ~(1U << 0);          
-    CH0_PSCR = 0xFFFFFFFFU;           // Clear all flags
-    CH0_CCR = USIC_CCR_MODE_DISABLED; // Configure while mode is disabled.
-
-    // 2. Restore IIC input paths and data format.
-    CH0_DX0CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_B; // SDA path
-    CH0_DX1CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A; // SCL path
-    CH0_DX2CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A;
-    CH0_SCTR = USIC_SCTR_SDIR_MSB |
-               USIC_SCTR_DOCFG_OD |
-               USIC_SCTR_TRM_IIC |
-               USIC_SCTR_FLE(0x3FU) |
-               USIC_SCTR_WLE(7U);
-    CH0_FDR = USIC_FDR_DM_DIV | USIC_FDR_STEP_MAX;
-    CH0_BRG = USIC_BRG_CLKSEL_DX1T |
-              USIC_BRG_DCTQ(9U) |
-              USIC_BRG_PDIV(63U) |
-              USIC_BRG_SCLKCFG(0U);
-
-    // 3. IIC Protocol Control (Minimal requirements for Master):
-    // STIM = 0 (100 kBaud Standard Mode Timing)
-    // HDEL = 3 (Hardware Delay)
-    CH0_PCR = (0U << 17) | // PCR.STIM = 0 
-              (3U << 26);             // PCR.HDEL = 3 (Delay for SDA Hold Time) 
-
-    CH0_CCR = USIC_CCR_MODE_IIC;
-
-    // 4. Enable Channel
-    CH0_KSCFG |= (1U << 0);
-    // Read back KSCFG after enabling to avoid pipeline effects 
-    (void)CH0_KSCFG;
-}
-
-/**
- * @brief Configures USIC0_CH0 pins for UART and sets protocol to ASC Mode (2H).
- * 
- * This sequence is called just before sending data to the PC Terminal.
- */
-void USIC_SetMode_UART_CH0(void) {
-    // 1. Disable Channel and Clear Flags
-    CH0_KSCFG &= ~(1U << 0);          // Disable Channel
-    CH0_PSCR = 0xFFFFFFFFU;           // Clear all flags
-    CH0_CCR = USIC_CCR_MODE_DISABLED; // Configure while mode is disabled.
-
-    // 2. Configure ASC input paths (INSW=0 as recommended).
-    CH0_DX0CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A; // RX input selection
-    CH0_DX1CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A; // TX feedback/collision path
-    CH0_DX2CR = USIC_DXCR_INSW_DIRECT | USIC_DXCR_DSEL_A;
-
-    // 3. Configure basic ASC framing with 8-bit words and TRM=01b.
-    CH0_SCTR = USIC_SCTR_TRM_STD |
-               USIC_SCTR_FLE(7U) |
-               USIC_SCTR_WLE(7U);
-    CH0_PCR = 0x0U;
-    CH0_CCR = USIC_CCR_MODE_ASC;
-    
-    // 4. Enable Channel
-    CH0_KSCFG |= (1U << 0);
-    (void)CH0_KSCFG;
-}
-
-void USIC_UART_Init(void) {
-    // In this revised plan, USIC_UART_Init is essentially absorbed by USIC_I2C_Init()
-    // regarding shared hardware setup (Clock, FDR, BRG).
-    // The specific UART mode (ASC) configuration is handled exclusively in USIC_SetMode_UART_CH0().
-    
-    // Therefore, this function can be empty if it only sets up shared channel 0 resources. 
-    // If it was intended for CH1, it would contain dedicated pin setup for UART on CH1 pins.
 }

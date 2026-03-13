@@ -4,9 +4,14 @@ module qrs_actuator (
     input wire [7:0] current_bpm,
     output reg alarm_out
 );
+    /*
+     * alarm_out = 1 if (current_bpm > 100 || current_bpm < 50) && current_bpm != 0
+     * No hysteresis: could cause chattering if BPM oscillates near threshold
+     * I need to consider adding hysteresis in future: alarm_on @ 100, clear @ 95
+     */
     // Simple comparison logic goes here.
     localparam BPM_LOW_THRESHOLD = 8'd50;
-    localparam BPM_HIGH_THRESHOLD = 8'd120;
+    localparam BPM_HIGH_THRESHOLD = 8'd100;
     
     always @(posedge clk_core) begin
         if (!rst_n) begin

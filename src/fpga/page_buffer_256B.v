@@ -1,18 +1,37 @@
-// page_buffer_256B.v
-// Accumulates 16-bit ECG samples (as two bytes) into a 256-byte dual-ported RAM structure.
-// Signals 'buf_full' when ready to be consumed by the w25q64_page_logger.
+/**
+ * 256-byte page buffer for flash logging (128 × 16-bit ECG samples).
+ *
+ * BUFFERING STRATEGY:
+ * Stores exactly 256 bytes (128 samples) before signaling buf_full
+ * Matches W25Q64FV page size (256-byte write bursts)
+ * Prevents partial-page writes which would waste flash storage
+ *
+ * STATE MACHINE:
+ * 1. FILLING: Accumulates words until 256 bytes (wr_ptr reaches 254+2)
+ * 2. FULL: Waits for logger to start (logger_busy rises)
+ * 3. ARMED: Tracks logger operation
+ * 4. CONSUME: When logger_busy falls, reset pointers and resume filling
+ *
+ * OUTPUT FORMAT: MSB-first byte ordering for each 16-bit sample
+ * - mem[wr_ptr]  = sample[15:8] (MSB first)
+ * - mem[wr_ptr+1] = sample[7:0]  (LSB second)
+ */
 
 module page_buffer_256B (
-    input  wire clk,
-    input  wire reset_n,
-    // write side (from DSP pipeline)
-    input  wire push_word,        // Goes high when a 16-bit word is ready
-    input  wire [15:0] word_in,
-    // read side (for flash logger)
-    output wire [7:0]  buf_dout,    // Byte output to the logger
-    input  wire [7:0]  buf_addr,    // Address requested by logger (0 to 255)
-    output reg   buf_full,    // Asserted when the buffer has 256 bytes (128 samples)
-    input  wire  logger_busy  // Logger status: high when logger is performing WREN/PageProgram
+    input wire clk,
+    input wire reset_n,
+
+    // Write interface (from DSP pipeline)
+    input wire push_word,    // Push new 16-bit sample strobe
+    input wire [15:0] word_in,  // 16-bit filtered ECG sample
+
+    // Read interface (asynchronous for flash logger)
+    output wire [7:0]  buf_dout,  // Byte output (combinatorial from mem array)
+    input wire [7:0]  buf_addr,    // Byte address from logger (0-255)
+
+    // Status signals
+    output reg   buf_full,     // High when 256 bytes are ready
+    input  wire  logger_busy   // High when logger is performing transaction
 );
 
     // Page memory: 256 depth, 8-bit width
@@ -24,9 +43,9 @@ module page_buffer_256B (
 
     always @(posedge clk) begin
         if (!reset_n) begin
-            wr_ptr   <= 8'd0;
+            wr_ptr  <= 8'd0;
             buf_full <= 1'b0;
-            armed    <= 1'b0;
+            armed   <= 1'b0;
         end else begin
             // 1. Consumption Logic (Wait for logger to finish)
             if (buf_full) begin
@@ -34,8 +53,8 @@ module page_buffer_256B (
                 if (armed &&!logger_busy) begin
                     // Logger finished the page write, reset buffer state
                     buf_full <= 1'b0;
-                    wr_ptr   <= 8'd0;
-                    armed    <= 1'b0;
+                    wr_ptr <= 8'd0;
+                    armed <= 1'b0;
                 end
             end 
             // 2. Filling Logic
